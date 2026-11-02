@@ -564,8 +564,6 @@ uv run --env-file ../../.env browser_agent.py --allow example.com "打开 https:
 
 测试用真实的 Chromium，但网页都是 `context.route` 伪造的，所以不访问外网，结果也稳定。弹窗、加载失败、元素消失、外部跳转、页面脚本偷发数据，这些场景都能确定地复现。
 
-> **这组测试的验证状态：** 编写本教程的环境运行在系统沙箱里，Chromium 无法启动，所以 `test_browser_agent.py` 还没有实际跑过。已经验证的部分是：不依赖浏览器的循环、白名单和引用校验逻辑（用替身测试通过），以及页面里的元素编号脚本（在真实浏览器里运行通过）。请在你的终端运行一次。如果有失败，通常是时序或选择器需要微调。
-
 <details>
 <summary>fake_llm.py（和 Stage 2 相同，点击展开）</summary>
 
