@@ -29,29 +29,6 @@ uv run agent-life-from-zero/extract_json.py
 
 官方参考：[OpenAI Python SDK](https://github.com/openai/openai-python)、[DeepSeek JSON Output](https://api-docs.deepseek.com/guides/json_mode/)。JSON mode 不等于字段 schema 校验，空白输出和截断输出也需要处理。
 
-## 离线测试
-
-无需 API Key，不发出模型请求：
-
-```bash
-uv run python -m unittest discover -s tests -p 'test_examples.py' -v
-```
-
-### 教程完整代码的回归测试
-
-下列命令在独立虚拟环境中安装测试依赖，提取 Markdown 的完整程序到临时目录，再运行章节中的离线测试。无需配置模型 Key；不会调用付费模型。浏览器测试使用本地模拟页面，但首次安装依赖和 Chromium 需要联网。
-
-```bash
-uv venv .venv-tutorial-tests
-uv pip install --python .venv-tutorial-tests/bin/python pytest openai httpx pydantic langgraph pyyaml 'mcp[cli]>=2,<3' playwright
-.venv-tutorial-tests/bin/python -m playwright install chromium
-.venv-tutorial-tests/bin/python -m pytest tests/test_tutorial_early.py tests/test_stage6_logic.py -q
-.venv-tutorial-tests/bin/python scripts/check_tutorials_456.py
-.venv-tutorial-tests/bin/python scripts/check_tutorials_78.py
-```
-
-以上路径适用于 macOS/Linux；Windows 将 `.venv-tutorial-tests/bin/python` 换成 `.venv-tutorial-tests/Scripts/python.exe`。这组依赖独立于示例脚本的 `uv.lock`，并非线上 API、联网检索或所有服务商兼容性验证。若环境不允许启动 Chromium，Stage 6 的完整浏览器测试不能视为通过；独立逻辑回归也不能替代它。已安装系统 Chromium 时，可通过 `TUTORIAL_CHROMIUM_EXECUTABLE` 指定其可执行路径。
-
 ## 随附参考资料
 
 `docs/Hello-Agents-V1.0.3-20260717.pdf` 是第三方 Hello-Agents 教材的 2026-07-17 快照（720 页），不是本仓库逐页维护的当前文档。本次教程勘误未对该 PDF 做逐页全面复核，也未修改其内容；请以 [Hello-Agents 上游仓库](https://github.com/datawhalechina/hello-agents) 的当前版本为准。
