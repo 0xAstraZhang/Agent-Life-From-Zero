@@ -403,6 +403,10 @@ class Harness:
             tracer.event(step, "tool_error", tool=name, error="bad_json")
             return f"错误：参数不是合法 JSON（{e}）"
 
+        if not isinstance(args, dict):
+            tracer.event(step, "tool_error", tool=name, error="bad_args")
+            return "错误：参数必须是 JSON 对象，请修正后重试"
+
         for hook in self.pre_tool_hooks:
             if reason := hook(name, args):
                 tracer.event(step, "permission", tool=name, args=args, allowed=False, reason=f"hook: {reason}")
@@ -506,9 +510,13 @@ class Harness:
 
 **拒绝也是一种结果。** 被拒绝的调用不会让程序崩溃，而是告诉模型“已拒绝”和原因。模型可能会想绕路，比如 `delete_file` 被拒后尝试别的工具，所以返回文字里写明了“不要换一种方式重试”。
 
+**恢复仍有边界。** 本实现可以恢复模型请求失败前已落盘的完整工具轮次，但工具执行中崩溃或 `Ctrl+C` 可能留下未配对调用，不能直接安全续跑。必须先补齐“已中断、结果未知”的结果并核实真实副作用，不能自动重复执行删除等操作；这项恢复逻辑留在文末进阶练习。
+
 **会话只追加，不修改。** 压缩时只是写入一条新的快照记录，原始消息还留在文件前面。Claude Code 同样把每条消息写进 JSONL 文件。
 
 **压缩分两级。** 先做免费的：把旧工具结果换成一句话。不够再花钱让模型写摘要。摘要提示词明确要求保留用户目标、已做的事、改过的文件和错误，这也是压缩后最容易丢的内容。
+
+**总时限不是硬终止。** `total_timeout` 只在每轮开始检查，工具在当前进程同步运行，模型请求还可能重试，因此阻塞的工具或请求会超过这个时限。需要硬超时时，应给网络请求设置预算，并把可中止的工具放进受限子进程。
 
 **`compact_at` 要留足余量。** 如果保留段本身就超过阈值，压缩后马上又超，每一轮都会触发一次摘要。Claude Code 也遇到同样的问题，它的做法是连续几次压不下来就停止，并报错。
 
@@ -789,11 +797,11 @@ harness 执行后剩下： ['lab_notes.md']
 | 模型想删不该删的文件 | 直接删除，无法恢复 | deny 规则拦截，函数没有执行 |
 | 只想试跑，不想有副作用 | 做不到 | `--mode plan` 只放行只读工具 |
 | 无人值守运行 | 要么全放行，要么卡住等输入 | `dontask` 模式：要确认的操作一律拒绝 |
-| 断网或进程崩溃 | 消息全丢，从头再来 | `--resume` 从 JSONL 恢复，接着做 |
+| 模型请求失败 | 消息全丢，从头再来 | `--resume` 从 JSONL 恢复已完成的消息；工具执行中中断还需修复配对 |
 | 工具结果 100 KB | 全部塞进上下文，越来越贵 | 超长截断，旧结果省略，再不够就写摘要 |
 | 运行后追查原因 | 只能看到最终回答 | trace 记录每次决策、耗时、token |
 | 想统一拦截某类操作 | 改每个工具 | 加一个 hook |
-| 模型调用次数和时间 | 只限步数 | 步数和总时长都限制，状态写明原因 |
+| 模型调用次数和时间 | 此处对照代码只限步数 | 限步数，并在轮次之间检查软时限，状态写明原因 |
 
 但 harness 不是免费的。**简单的一次性任务用裸循环就够了**：只有读操作、不需要恢复、不怕失败的脚本，300 行的 harness 只会增加负担。判断标准是**出错的代价**和**运行时长**：能造成不可逆后果的工具，或者要运行很久的任务，才值得加这些机制。
 
@@ -940,6 +948,15 @@ def test_bad_tool_name_args_and_tool_exception_are_fed_back():
     assert r.status == "done"
 
 
+def test_non_object_tool_arguments_are_returned_as_errors():
+    from types import SimpleNamespace
+    from harness import Tracer
+    h = make([])
+    for raw in ["[]", "null", "42", '"text"']:
+        malformed = SimpleNamespace(function=SimpleNamespace(name="read_file", arguments=raw))
+        assert "JSON 对象" in h._execute(malformed, 1, Tracer("bad-args"))
+
+
 def test_session_can_be_resumed_after_a_crash():
     crash = make([call("list_files", pattern="*"), RuntimeError("断网了")])
     r1 = crash.run("第一个任务")
@@ -998,7 +1015,7 @@ def test_limits_are_reported():
 
 </details>
 
-运行后应看到 `13 passed`：
+运行后应看到 `14 passed`：
 
 ```bash
 uv run pytest test_harness.py -q

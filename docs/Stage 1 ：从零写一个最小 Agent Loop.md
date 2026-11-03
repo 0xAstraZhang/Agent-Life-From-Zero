@@ -103,12 +103,12 @@ while True:
 
 1. **提示词**：写清字段并给一个输出示例。DeepSeek 的 JSON 模式还要求提示词里出现 “json” 这个词。
 2. **JSON 模式**：`response_format={"type": "json_object"}` 保证语法合法，但不保证字段名和类型对。
-3. **代码兜底**：`json.loads` 解析，检查字段，不对就重试，重试几次还不行就报错。
+3. **代码兜底**：先检查输出是否正常结束，再用 `json.loads` 解析，检查对象、所有字段和有限数值。不对就重试，重试几次还不行就报错。Python 默认会解析 `NaN`、`Infinity`，`true` 又属于 `int` 的子类，所以数值校验不能只用 `isinstance(value, (int, float))`。
 
 新建 `extract_json.py`：
 
 ```python
-import json, os
+import json, math, os
 from openai import OpenAI
 
 client = OpenAI(base_url=os.getenv("LLM_BASE_URL"), api_key=os.getenv("LLM_API_KEY"))
@@ -126,13 +126,19 @@ def extract(text: str, retries: int = 2) -> dict:
             response_format={"type": "json_object"},  # 打开 JSON 模式
             max_tokens=500,                            # 太小会把 JSON 截断
         )
+        if resp.choices[0].finish_reason != "stop":
+            print(f"第{attempt}次：输出未正常完成")
+            continue
         raw = resp.choices[0].message.content or ""
         try:
             data = json.loads(raw)
         except json.JSONDecodeError:
             print(f"第{attempt}次：不是合法 JSON -> {raw!r}")
             continue
-        if isinstance(data.get("sample"), str) and isinstance(data.get("value"), (int, float)):
+        if (isinstance(data, dict) and isinstance(data.get("sample"), str)
+                and isinstance(data.get("measure"), str)
+                and type(data.get("value")) in (int, float)
+                and (isinstance(data["value"], int) or math.isfinite(data["value"]))):
             return data                                # 校验通过
         print(f"第{attempt}次：字段不对 -> {data}")
     raise ValueError("模型多次没有给出符合要求的 JSON")
@@ -192,7 +198,8 @@ def read_file(path: str) -> str:
 def search(query: str) -> str:
     hits = []
     for f in sorted(WORKDIR.rglob("*")):
-        if f.is_file() and f.suffix in {".txt", ".md", ".csv"}:
+        if (f.is_file() and f.suffix in {".txt", ".md", ".csv"}
+                and f.resolve().is_relative_to(WORKDIR)):
             lines = f.read_text(encoding="utf-8", errors="ignore").splitlines()
             for i, line in enumerate(lines, 1):
                 if query.lower() in line.lower():
@@ -417,13 +424,15 @@ for step in range(1, MAX_STEPS + 1):                                            
 return f"[停止] 已达到最大步数 {MAX_STEPS}，仍未得到最终答案"
 ```
 
-一个要知道的局限：Python 的线程没法被强行杀死。超时只是“不再等它”，那个线程仍会在后台跑完。如果以后要执行模型写的代码，必须放到子进程（`subprocess` 带 `timeout`）或容器里，才能真正杀掉和隔离。
+这里的总时限也是软时限：只在每轮开始检查，当前请求、SDK 重试和一轮中的工具调用可能让实际耗时超出 `TOTAL_TIMEOUT`。
+
+一个要知道的局限：Python 的线程没法被强行杀死。超时只是“不再等它”，那个线程仍会在后台跑完，而且解释器退出前仍会等待线程池中的任务结束（见 [concurrent.futures 文档](https://docs.python.org/3/library/concurrent.futures.html#concurrent.futures.ThreadPoolExecutor)）。如果以后要执行模型写的代码，必须放到子进程（`subprocess` 带 `timeout`）或容器里，才能真正杀掉和隔离。
 
 `MAX_STEPS` 取多少？这个最小 agent 的任务一般 2–4 轮就能完成，设 8 留了余量。任务变复杂时再调大，并观察每次实际用了几轮。
 
-## 完整代码：149 行的最小 Agent
+## 完整代码：最小 Agent
 
-把前六步拼起来就是下面的 `agent.py`：去掉空行和注释约 117 行，落在你的目标 50–150 行之内。代码注释里标了每段对应第几步。
+把前六步拼起来就是下面的 `agent.py`：它保留了完整循环和基本护栏，便于直接复制运行。代码注释里标了每段对应第几步。
 
 ```bash
 python agent.py "实验笔记里样本A和样本B的OD600平均值是多少？"
@@ -454,8 +463,8 @@ MODEL = os.getenv("LLM_MODEL", "deepseek-flash")
 API_KEY = os.getenv("LLM_API_KEY")
 
 MAX_STEPS = 8            # 最多和模型往返几轮（防止死循环）
-TOOL_TIMEOUT = 10        # 单个工具最多运行几秒
-TOTAL_TIMEOUT = 120      # 整个任务最多几秒
+TOOL_TIMEOUT = 10        # 最多等待单个工具几秒（不会终止后台线程）
+TOTAL_TIMEOUT = 120      # 轮次之间检查的软时限，不是强制终止时间
 MAX_TOOL_OUTPUT = 4000   # 工具结果最多回传多少字符（防止撑爆上下文）
 WORKDIR = Path("workspace").resolve()  # read_file / search 只能碰这个目录
 
@@ -496,7 +505,8 @@ def search(query: str) -> str:
     """在 workspace 的文本文件里按关键词搜索，返回「文件:行号: 内容」。"""
     hits = []
     for f in sorted(WORKDIR.rglob("*")):
-        if f.is_file() and f.suffix in {".txt", ".md", ".csv"}:
+        if (f.is_file() and f.suffix in {".txt", ".md", ".csv"}
+                and f.resolve().is_relative_to(WORKDIR)):
             lines = f.read_text(encoding="utf-8", errors="ignore").splitlines()
             for i, line in enumerate(lines, 1):
                 if query.lower() in line.lower():
@@ -593,7 +603,7 @@ if __name__ == "__main__":
 | `帮我读一下 ../agent.py` | read\_file 返回 PermissionError，模型向你说明读不了 | 错误喂回而不崩溃 |
 | 把 `MAX_STEPS` 改成 1，再问第三题 | 输出 `[停止] 已达到最大步数 1……` | 最大步数护栏 |
 
-不联网也能测：随教程附带的 `test_agent.py` 用一个按剧本返回 tool call 的“假模型”，检查循环逻辑、消息顺序、错误处理和两类超时。和 `agent.py` 放在同一目录，运行 `python test_agent.py`，应看到“全部 7 个测试通过”。这种“假模型”测试法值得学：真模型的输出每次不同，用它测不出确定的结论。
+不联网的循环测试可以参考 Stage 2 提供的 `fake_llm.py`，按剧本返回 tool call，检查消息顺序、错误处理和停止条件。本章尚未附上 `test_agent.py`，不要直接运行不存在的测试文件。真模型的输出每次不同，因此确定性的逻辑测试应使用假模型。
 
 ## 三家 API 的工具调用对照
 
@@ -651,7 +661,7 @@ for step in range(MAX_STEPS):
 - [ ] 能手写一个工具的 JSON Schema，并说出模型靠哪个字段决定“什么时候用它”。
 - [ ] 能说出 `arguments` 为什么要 `json.loads`，以及一轮有多个 `tool_calls` 时怎么处理。
 - [ ] 能口述一次多步任务中 `messages` 的变化顺序。
-- [ ] 五个验收问题表现正确，`python test_agent.py` 全部通过。
+- [ ] 五个验收问题表现正确，并能解释软超时与真正终止工具的区别。
 
 ### 常见坑
 

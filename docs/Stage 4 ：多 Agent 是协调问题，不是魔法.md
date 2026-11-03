@@ -125,6 +125,8 @@ def route_after_review(s):
 | 任务漂移 | 写着写着偏离了原始任务 | `brief` 和 `acceptance` 始终原样传递；审稿人判断 `on_brief`；不许提标准之外的要求 |
 | 上下文膨胀 | 每个 agent 都带着全部历史，越来越贵 | 只交接产物，不交接对话过程 |
 
+这里的 token 预算是在下一次调用前检查上一轮的实际用量，属于软阈值，单次调用仍可能越过它；不是供应商账单的硬上限。
+
 三点补充：
 
 **转交给人也是一种结果。** 流水线有三种结束状态：`done`、`needs_human`、`failed`。`needs_human` 会同时给出当前草稿和未解决的问题，不会悄悄输出一份没通过的稿子，也不会把已有成果丢掉。
@@ -156,7 +158,7 @@ reviewer          1360       120
 - `research_node` 丢掉来源不是工具真实返回过的事实，防止研究员编造来源。
 - `check_refs` 检查稿件里的 `[F9]` 是否存在。查出问题就直接进入修改，省下一次审稿调用。
 
-`test_bad_reference_skips_reviewer_call` 这个测试验证了这一点。
+`test_bad_reference_skips_reviewer_call` 这个测试验证了这一点。来源白名单只证明该位置确实返回过，不证明模型写出的 claim 被原文支持；重要结论仍要核对原文或加入事实一致性评测。
 
 ## 第 5 步：什么时候单 agent 更好
 
@@ -341,6 +343,8 @@ def make_search(ctx: Context) -> Callable:
                     source = f"{f.relative_to(WORKDIR)}:{no}"
                     ctx.seen_sources.add(source)
                     hits.append(f"{source}: {line.strip()}")
+                    if len(hits) == 20:
+                        return "\n".join(hits)
         return "\n".join(hits[:20]) or f"没有找到“{query}”，换个关键词再试。"
     return search_notes
 
@@ -670,6 +674,14 @@ def test_fake_sources_are_dropped():
     assert [f.id for f in state.notes.facts] == ["F1"] and "99" in state.notes.gaps[0]
 
 
+def test_only_returned_sources_are_trusted():
+    (ma.WORKDIR / "many.md").write_text("hit\n" * 25, encoding="utf-8")
+    ctx = ma.make_context(FakeLLM([]))
+    output = ma.make_search(ctx)("hit")
+    assert len(output.splitlines()) == 20
+    assert "many.md:20" in ctx.seen_sources and "many.md:21" not in ctx.seen_sources
+
+
 def test_bad_reference_skips_reviewer_call():
     bad = json.dumps({"title": "t", "body": "样本B是1.37 [F9]。"}, ensure_ascii=False)
     state, ctx = ma.run_pipeline("写简报", FakeLLM([PLAN, SEARCH, NOTES, bad, DRAFT, PASS]))
@@ -715,7 +727,7 @@ def test_langgraph_version_takes_the_same_path():
 
 </details>
 
-运行后应看到 `16 passed`：
+运行后应看到 `17 passed`：
 
 ```bash
 uv run pytest test_multi_agent.py -q
