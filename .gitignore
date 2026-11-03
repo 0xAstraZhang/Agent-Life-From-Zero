@@ -11,3 +11,6 @@ wheels/
 
 # Secrets
 .env
+
+# Isolated tutorial regression environment
+.venv-tutorial-tests/
