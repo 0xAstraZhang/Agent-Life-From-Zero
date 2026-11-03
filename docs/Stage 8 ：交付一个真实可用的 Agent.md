@@ -8,7 +8,7 @@
 - 有 CI，每次提交都跑测试，每周用真模型跑一次评测。
 - 有一份真正能帮人上手的 README。
 
-这份教程的代码已经做过“换一个空目录 clone 下来”的验证：`uv sync --locked`、全部测试、打包，再把包装到另一个环境里运行，都通过了。
+完成本章代码后，应在干净目录中验证 `uv sync --locked`、全部测试和打包，再把包装到另一个环境中运行；每次修改后都应重新完成这些检查。
 
 Demo 和产品之间的差距，不在于模型多聪明，而在于**出错时会发生什么**。核心只有一句话：**让一个不认识你的人，在你不在场的时候，也能用起来、用得安全、出了问题查得到。**
 
@@ -213,7 +213,7 @@ class Settings:
 | 要求 | 怎么做 | 代码 | 来自 |
 | --- | --- | --- | --- |
 | 错误重试 | SDK 自动重试限流、网络错误和 5xx；key 错误不重试 | `make_client`、`run` | Stage 1 |
-| 超时 | 单次请求 60 秒；整个任务 `timeout_s` | `make_client`、`deadline` | Stage 1 |
+| 超时 | 请求超时 60 秒；循环边界检查 `timeout_s`（协作式） | `make_client`、`deadline` | Stage 1 |
 | 成本上限 | 每次调用模型前检查 token 和金额 | `Budget` | Stage 4 |
 | 不崩溃 | 工具的任何失败都变成文字，交还给模型 | `Toolbox.call` | Stage 1 |
 | 引用校验 | 代码核对引用，失败重试一次，再不行就标记 | `check_citations` | Stage 2 |
@@ -225,7 +225,7 @@ class Settings:
 
 **区分哪些错误值得重试。** 限流和网络抖动，重试通常有用。key 错误重试多少次都没用，还浪费时间，所以 `AuthenticationError` 要单独处理，并直接告诉用户去检查什么。
 
-**成本上限要在调用之前检查。** 调用之后才发现超了，钱已经花了。模型卡在循环里时，这道限制就是你的保险。服务商的控制台也应该设置一个总额度，作为最后的兜底。
+**这里的预算是软上限。** 每次调用前检查的是累计已用量，下一次请求仍可能超出剩余额度；`timeout_s` 也只在循环边界检查，不能中止正在等待的请求、重试或人工确认。SDK 的请求超时不等于整个任务的硬截止时间。生产环境还需要限制单次输出、预估输入成本，并用独立进程或作业超时实现硬截止；服务商的额度设置也应核实是硬限制还是仅告警。
 
 **价格不要写死。** 模型价格经常变化，写死在代码里迟早会错。所以这里放进配置，没配置时明确提示“只按 token 限制”。
 
@@ -264,6 +264,17 @@ SYSTEM = f"""你是实验室资料助手，只根据工具查到的内容回答�
 5. 操作被拒绝时不要换方式重试，如实告诉用户。"""
 
 
+def redact_record(value):
+    """先递归脱敏字符串，再序列化；不要用正则修改已经编码的 JSON。"""
+    if isinstance(value, str):
+        return redact(value)
+    if isinstance(value, dict):
+        return {key: redact_record(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [redact_record(item) for item in value]
+    return value
+
+
 def redact(text: str) -> str:
     """写日志前去掉看起来像密钥的内容。"""
     return SECRET_RE.sub("[已隐藏]", text)
@@ -278,7 +289,7 @@ class Tracer:
     def event(self, kind: str, **data) -> None:
         record = {"ts": round(time.time(), 3), "run_id": self.run_id, "kind": kind, **data}
         with self.path.open("a", encoding="utf-8") as f:
-            f.write(redact(json.dumps(record, ensure_ascii=False)) + "\n")
+            f.write(json.dumps(redact_record(record), ensure_ascii=False) + "\n")
 
 
 class Budget:
@@ -304,7 +315,7 @@ class Budget:
     def exceeded(self) -> str | None:
         if self.tokens >= self.s.max_tokens:
             return f"已用 {self.tokens} tokens，达到上限 {self.s.max_tokens}"
-        if self.s.price_input and self.cost >= self.s.max_cost_usd:
+        if (self.s.price_input or self.s.price_output) and self.cost >= self.s.max_cost_usd:
             return f"已花费 ${self.cost:.4f}，达到上限 ${self.s.max_cost_usd}"
         return None
 
@@ -402,11 +413,11 @@ def run(question: str, settings: Settings, client=None, confirm=lambda name, arg
 | 能力 | `lab-agent` 的边界 | 最坏情况 |
 | --- | --- | --- |
 | 读 | 只能读资料目录 | 读到资料本身。读不到 `.env` 和其他目录 |
-| 写 | 只能写输出目录，并且要确认 | 输出目录多了一个文件 |
-| 网络 | 没有网络工具 | 数据发不出去（模型回答本身会发给模型服务商） |
+| 写 | 只能写输出目录，并且要确认 | 输出目录新增或覆盖一个文件，确认前应检查文件名和内容 |
+| 网络 | 没有网络工具 | 没有通用外发工具，但问题、对话历史和工具返回的资料会发送给所配置的模型服务商 |
 | 执行代码 | 没有 | 不存在这个风险 |
 
-这就是 Stage 7 讲的“砍掉致命三要素中的一项”：没有向外发送的通道。
+这减少了 Stage 7 所说的任意外发通道，但不等于数据完全不离开本机。使用前确认资料可以交给所配置的模型服务商；目录边界检查也不防御其他进程并发替换文件的竞态，敏感部署还需要 OS 级隔离。
 
 **无人值守时默认拒绝。** 这是最容易出事的地方：如果 CI 或定时任务里“没人回答，所以默认同意”，确认机制就形同虚设。`ask_user` 发现不是交互终端就直接拒绝。真的需要自动写入，必须显式加上 `--yes`，这样意图是明确的，也留有记录。
 
@@ -462,17 +473,28 @@ class Toolbox:
         """在实验资料里搜索一个关键词。返回匹配的行，开头的 [文件:行号] 就是引用时要写的内容"""
         hits = []
         for f in sorted(self.notes_dir.rglob("*")):
-            if f.is_file() and f.suffix in {".md", ".txt", ".csv"}:
+            if (f.is_file() and f.suffix in {".md", ".txt", ".csv"}
+                    and f.resolve().is_relative_to(self.notes_dir)):
                 for no, line in enumerate(f.read_text(encoding="utf-8", errors="ignore").splitlines(), 1):
                     if query.lower() in line.lower():
                         hits.append(self._record(str(f.relative_to(self.notes_dir)), no, line))
-        return "\n".join(hits[:20]) or f"没有找到“{query}”。换个关键词再试一次；还没有就如实说明。"
+                        if len(hits) == 20:
+                            return "\n".join(hits)  # 只登记实际返回给模型的来源
+        return "\n".join(hits) or f"没有找到“{query}”。换个关键词再试一次；还没有就如实说明。"
 
     @tool(risk="read")
     def read_note(self, path: str) -> str:
-        """读取一个资料文件的全部内容，每行开头有 [文件:行号]"""
+        """读取资料文件开头的完整行，最多 6000 字符；每行开头有 [文件:行号]"""
         lines = self._inside(self.notes_dir, path).read_text(encoding="utf-8", errors="ignore").splitlines()
-        return "\n".join(self._record(path, no, line) for no, line in enumerate(lines, 1))[:6000]
+        output, size = [], 0
+        for no, line in enumerate(lines, 1):
+            rendered = f"[{path}:{no}] {line.strip()}"
+            added = len(rendered) + (1 if output else 0)
+            if size + added > 6000:
+                break                       # 不登记被截断或完全未返回的行
+            output.append(self._record(path, no, line))
+            size += added
+        return "\n".join(output) or "文件为空，或首行超出 6000 字符限制。请用 search_notes 按关键词查询。"
 
     @tool(risk="write")
     def save_report(self, filename: str, content: str) -> str:
@@ -498,6 +520,8 @@ class Toolbox:
         except Exception as e:
             return f"错误：{type(e).__name__}: {e}", False
 ```
+
+搜索最多返回 20 行；`read_note` 只返回 6000 字符内能完整容纳的开头若干行。超过限制的行不会进入引用登记表，单行过长时可改用关键词搜索。来源登记只核对模型是否收到过对应行，不证明回答中的结论被原文支持。
 
 ## 第 5 步：选择部署方式
 
@@ -557,7 +581,7 @@ def cmd_doctor(_args) -> int:
     print(f"模型：{settings.model}\n接口：{settings.base_url or '默认'}\nAPI Key：已设置（{len(settings.api_key)} 字符）")
     print(f"资料目录：{settings.notes_dir}（{len(notes)} 个文件）\n输出目录：{settings.output_dir}")
     print(f"限制：{settings.max_steps} 步，{settings.timeout_s:.0f} 秒，{settings.max_tokens} tokens")
-    print("金额上限：" + (f"${settings.max_cost_usd}" if settings.price_input else "未启用（没有配置价格，只按 token 限制）"))
+    print("金额上限：" + (f"${settings.max_cost_usd}" if (settings.price_input or settings.price_output) else "未启用（没有配置价格，只按 token 限制）"))
     return 0
 
 
@@ -982,6 +1006,71 @@ def events(result):
         return [json.loads(line) for line in f]
 
 
+def test_trace_redaction_preserves_json(settings):
+    from lab_agent.agent import Tracer
+    tracer = Tracer(settings.trace_dir, "redaction")
+    tracer.event("test", question="api_key=hunter22", nested={"values": ["api-key=secret22"]})
+    record = json.loads(tracer.path.read_text(encoding="utf-8"))
+    assert record["question"] == "[已隐藏]"
+    assert record["nested"]["values"] == ["[已隐藏]"]
+
+
+def test_search_does_not_follow_external_symlink(settings):
+    from lab_agent.tools import Toolbox
+    secret = settings.notes_dir.parent / "outside.txt"
+    secret.write_text("outside-secret", encoding="utf-8")
+    (settings.notes_dir / "linked.txt").symlink_to(secret)
+    box = Toolbox(settings.notes_dir, settings.output_dir, lambda *_: False)
+    assert "outside-secret" not in box.search_notes("outside")
+    assert "linked.txt:1" not in box.seen
+
+
+def test_search_only_trusts_returned_lines(settings):
+    from lab_agent.tools import Toolbox
+    (settings.notes_dir / "many.md").write_text("hit\n" * 25, encoding="utf-8")
+    box = Toolbox(settings.notes_dir, settings.output_dir, lambda *_: False)
+    output = box.search_notes("hit")
+    assert len(output.splitlines()) == 20 and "[many.md:21]" not in output
+    assert "many.md:20" in box.seen and "many.md:21" not in box.seen
+    assert "many.md:21" not in box.lines
+    corrected = "查到了 [many.md:1]"
+    client = FakeLLM([call("search_notes", query="hit"), "编造 [many.md:21]", corrected])
+    result = run("查 hit", settings, client=client)
+    assert result.ok and result.answer == corrected and result.steps == 3
+    assert any(e["kind"] == "citation_failed" for e in events(result))
+
+
+@pytest.mark.parametrize("lines, hidden", [
+    (["x" * (6000 - len("[long.md:1] ")), "hidden"], "long.md:2"),
+    (["visible", "x" * 6100, "hidden"], "long.md:2"),
+    (["x" * 6100, "hidden"], "long.md:1"),
+])
+def test_read_note_only_trusts_complete_returned_lines(settings, lines, hidden):
+    from lab_agent.tools import Toolbox
+    (settings.notes_dir / "long.md").write_text("\n".join(lines), encoding="utf-8")
+    box = Toolbox(settings.notes_dir, settings.output_dir, lambda *_: False)
+    output = box.read_note("long.md")
+    assert len(output) <= 6000 and hidden not in box.seen and hidden not in box.lines
+    expected = {"long.md:1"} if len(lines[0]) + len("[long.md:1] ") <= 6000 else set()
+    assert box.seen == expected
+    if not expected:
+        assert "search_notes" in output
+    assert check_citations(f"编造 [{hidden}]", box.seen)
+    for locator in box.seen:
+        assert f"[{locator}] {box.lines[locator].strip()}" in output
+    client = FakeLLM([call("read_note", path="long.md"), f"编造 [{hidden}]", "未找到"])
+    result = run("读资料", settings, client=client)
+    assert result.ok and result.answer == "未找到" and result.steps == 3
+    assert any(e["kind"] == "citation_failed" for e in events(result))
+
+
+def test_output_only_price_enables_cost_limit(settings):
+    from lab_agent.agent import Budget
+    budget = Budget(replace(settings, price_input=0, price_output=1000, max_cost_usd=0.01))
+    budget.tokens_out = 20
+    assert budget.exceeded() is not None
+
+
 def test_answer_with_valid_citation(settings):
     r = run("样本B是多少", settings, client=FakeLLM([SEARCH, GOOD]))
     assert r.ok and r.status == "done" and "1.37" in r.answer and r.steps == 2
@@ -1141,7 +1230,7 @@ uv sync --locked
 uv run pytest -q
 ```
 
-应看到 `17 passed`。
+应看到 `24 passed`。
 
 第二步，故意配错，看报错是否友好（应该提示缺少 `LLM_API_KEY`，退出码为 2）：
 
@@ -1244,6 +1333,9 @@ uv run --env-file .env python evals/run_evals.py
 接下来，可以回到 Hub 的 [Project Ladder](Agent-Learning-Hub.md)，挑一个你真正需要的东西来做。**最好的下一个项目，是你自己每周都会用到的那个。**
 
 ### 资料来源
+
+- [OpenAI Python SDK：重试与超时](https://github.com/openai/openai-python#timeouts)
+- [Python pathlib：路径解析与符号链接](https://docs.python.org/3/library/pathlib.html#pathlib.Path.resolve)
 
 - [uv：构建和发布包](https://docs.astral.sh/uv/guides/package/)
 - [uv：在 GitHub Actions 中使用](https://docs.astral.sh/uv/guides/integration/github/)

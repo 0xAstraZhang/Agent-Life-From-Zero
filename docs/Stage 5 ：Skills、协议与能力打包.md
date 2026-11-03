@@ -104,7 +104,7 @@ Claude Code 在标准之上还有一些扩展：
 三个要知道的细节：
 
 - `description` 和 `when_to_use` 加起来，在列表里会被截断到 1536 字符，所以**把最关键的用途写在最前面**。
-- skill 加载后，正文会一直留在对话里；上下文压缩时，Claude Code 会把最近调用的 skill 重新附上。
+- skill 调用后会加入对话，但上下文压缩后可能只保留开头；重要规则放在最前面，必要时重新调用 skill 恢复完整说明。
 - 如果代码是通过 [Agent SDK](https://code.claude.com/docs/en/agent-sdk/skills) 运行的，skill 同样从文件系统加载，由 `setting_sources` 控制来源，由 `skills` 选项控制可用范围。
 
 ## 第 3 步：读 OpenClaw Skills
@@ -265,8 +265,20 @@ def check(report: str, root: Path | None = None) -> list[str]:
     for sid in sorted(cited - {i[0] for i in items}):
         problems.append(f"[{sid}] 在“证据”里找不到，格式应为：[{sid}] 位置 \"原文片段\"")
     for sid, locator, quote in items:
-        path = root / locator.split(":")[0] if root else None
-        if path and path.is_file() and _norm(quote) not in _norm(path.read_text(encoding="utf-8", errors="ignore")):
+        if root is None:
+            continue                       # 未提供资料目录时，只验证格式，不声称核实原文
+        match = re.fullmatch(r"(.+):([1-9]\d*)", locator)
+        if not match:
+            problems.append(f"[{sid}] 来源应为 文件:行号：{locator}")
+            continue
+        base = root.resolve()
+        path = (base / match[1]).resolve()
+        if not path.is_relative_to(base) or not path.is_file():
+            problems.append(f"[{sid}] 来源不存在或超出资料目录：{locator}")
+            continue
+        lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+        line_no = int(match[2])
+        if line_no > len(lines) or _norm(quote) not in _norm(lines[line_no - 1]):
             problems.append(f"[{sid}] 的片段不在 {locator} 里：{quote[:40]}")
     return problems
 
@@ -321,6 +333,8 @@ def parse_skill(skill_md: Path) -> Skill:
     if len(parts) < 3 or parts[0].strip():
         raise ValueError("缺少 YAML frontmatter")
     meta = yaml.safe_load(parts[1]) or {}
+    if not isinstance(meta, dict):
+        raise ValueError("YAML frontmatter 必须是键值映射")
     name, description = str(meta.get("name", "")), str(meta.get("description", "")).strip()
     if not NAME_RE.match(name) or len(name) > 64:
         raise ValueError(f"name 不合法：{name!r}（只能用小写字母、数字和连字符，最多 64 字符）")
@@ -470,7 +484,7 @@ if __name__ == "__main__":
 
 这里 `system_chars` 的实际测量结果是：没有 skill 时 system prompt 57 个字符，有一个 skill 时 241 个字符，目录只多了 184 个字符。十几个 skill 也才增加两千多字符，正文和模板都不用提前付出代价。
 
-**安全也是加载机制的一部分**：`_inside` 防止路径跳出 skill 目录，`run_skill_script` 只能运行 `scripts/` 下的文件，并且要用户确认，环境变量也被清空。测试里验证了这些限制。
+**安全也是加载机制的一部分**：`_inside` 防止路径跳出 skill 目录，`run_skill_script` 只能运行 `scripts/` 下的文件，并且要用户确认，环境变量也被清空。测试里验证了这些限制。注意 `-I`、清空环境变量和限制脚本路径都不是操作系统沙箱：获批脚本仍可读取宿主文件、联网或启动子进程，只运行审查过的代码；不可信代码应放到权限受限的隔离环境。
 
 ## 第 6 步：写 Smoke Test，验证真的有用
 
@@ -707,6 +721,7 @@ def test_discover_and_validate(tmp_path):
     for name, text in {"Bad_Name": "---\nname: Bad_Name\ndescription: x\n---\n",
                        "mismatch": "---\nname: other\ndescription: x\n---\n",
                        "no-desc": "---\nname: no-desc\n---\n",
+                       "bad-yaml": "---\n- not-a-mapping\n---\n",
                        "no-front": "没有 frontmatter"}.items():
         (tmp_path / "skills" / name).mkdir()
         (tmp_path / "skills" / name / "SKILL.md").write_text(text, encoding="utf-8")
@@ -760,6 +775,16 @@ def test_check_report_catches_problems():
     assert "找不到" in st.check_report.check(missing, rt.WORKDIR)[0]
 
 
+def test_check_report_rejects_missing_outside_and_wrong_line(tmp_path):
+    for locator in ["missing.md:2", "../outside.md:1", "lab_notes.md:999", "lab_notes.md:1"]:
+        report = GOOD.replace("lab_notes.md:2", locator)
+        assert st.check_report.check(report, rt.WORKDIR)
+    outside = tmp_path / "outside.md"
+    outside.write_text("样本B=1.37", encoding="utf-8")
+    (rt.WORKDIR / "linked.md").symlink_to(outside)
+    assert st.check_report.check(GOOD.replace("lab_notes.md:2", "linked.md:1"), rt.WORKDIR)
+
+
 def test_smoke_test_compares_with_and_without_skill():
     scripts = iter([without_skill_script(), with_skill_script()])
     rows = st.run_ab(lambda: FakeLLM(next(scripts)), runs=1, cases=[st.CASES[0]])
@@ -791,7 +816,7 @@ def test_mcp_server_works_through_real_client():
 
 </details>
 
-运行后应看到 `9 passed`：
+运行后应看到 `10 passed`：
 
 ```bash
 uv run pytest test_skills.py -q
@@ -850,7 +875,7 @@ if __name__ == "__main__":
     mcp.run()          # 默认走 stdio，由客户端以子进程方式启动
 ```
 
-函数签名就是 schema，docstring 就是说明书，协议细节 SDK 都处理好了。用官方调试工具看一下效果：
+函数签名就是 schema，docstring 就是说明书，协议细节 SDK 都处理好了。用官方调试工具看一下效果（Inspector 需要先安装 Node.js，并保证 `npx` 在 PATH 中）：
 
 ```bash
 uv run mcp dev lab_mcp_server.py

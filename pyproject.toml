@@ -1,7 +1,7 @@
 [project]
 name = "agent-life-from-zero"
 version = "0.1.0"
-description = "Add your description here"
+description = "从零学习 Agent 的教程与最小 Python 示例"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = ["openai>=2.54.0"]
