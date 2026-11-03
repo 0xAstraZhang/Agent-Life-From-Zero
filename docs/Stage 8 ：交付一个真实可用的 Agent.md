@@ -8,7 +8,7 @@
 - 有 CI，每次提交都跑测试，每周用真模型跑一次评测。
 - 有一份真正能帮人上手的 README。
 
-这份教程的代码已经做过“换一个空目录 clone 下来”的验证：`uv sync --locked`、全部测试、打包，再把包装到另一个环境里运行，都通过了。
+完成本章代码后，应在干净目录中验证 `uv sync --locked`、全部测试和打包，再把包装到另一个环境中运行；每次修改后都应重新完成这些检查。
 
 Demo 和产品之间的差距，不在于模型多聪明，而在于**出错时会发生什么**。核心只有一句话：**让一个不认识你的人，在你不在场的时候，也能用起来、用得安全、出了问题查得到。**
 
@@ -478,13 +478,23 @@ class Toolbox:
                 for no, line in enumerate(f.read_text(encoding="utf-8", errors="ignore").splitlines(), 1):
                     if query.lower() in line.lower():
                         hits.append(self._record(str(f.relative_to(self.notes_dir)), no, line))
-        return "\n".join(hits[:20]) or f"没有找到“{query}”。换个关键词再试一次；还没有就如实说明。"
+                        if len(hits) == 20:
+                            return "\n".join(hits)  # 只登记实际返回给模型的来源
+        return "\n".join(hits) or f"没有找到“{query}”。换个关键词再试一次；还没有就如实说明。"
 
     @tool(risk="read")
     def read_note(self, path: str) -> str:
-        """读取一个资料文件的全部内容，每行开头有 [文件:行号]"""
+        """读取资料文件开头的完整行，最多 6000 字符；每行开头有 [文件:行号]"""
         lines = self._inside(self.notes_dir, path).read_text(encoding="utf-8", errors="ignore").splitlines()
-        return "\n".join(self._record(path, no, line) for no, line in enumerate(lines, 1))[:6000]
+        output, size = [], 0
+        for no, line in enumerate(lines, 1):
+            rendered = f"[{path}:{no}] {line.strip()}"
+            added = len(rendered) + (1 if output else 0)
+            if size + added > 6000:
+                break                       # 不登记被截断或完全未返回的行
+            output.append(self._record(path, no, line))
+            size += added
+        return "\n".join(output) or "文件为空，或首行超出 6000 字符限制。请用 search_notes 按关键词查询。"
 
     @tool(risk="write")
     def save_report(self, filename: str, content: str) -> str:
@@ -510,6 +520,8 @@ class Toolbox:
         except Exception as e:
             return f"错误：{type(e).__name__}: {e}", False
 ```
+
+搜索最多返回 20 行；`read_note` 只返回 6000 字符内能完整容纳的开头若干行。超过限制的行不会进入引用登记表，单行过长时可改用关键词搜索。来源登记只核对模型是否收到过对应行，不证明回答中的结论被原文支持。
 
 ## 第 5 步：选择部署方式
 
@@ -1013,6 +1025,45 @@ def test_search_does_not_follow_external_symlink(settings):
     assert "linked.txt:1" not in box.seen
 
 
+def test_search_only_trusts_returned_lines(settings):
+    from lab_agent.tools import Toolbox
+    (settings.notes_dir / "many.md").write_text("hit\n" * 25, encoding="utf-8")
+    box = Toolbox(settings.notes_dir, settings.output_dir, lambda *_: False)
+    output = box.search_notes("hit")
+    assert len(output.splitlines()) == 20 and "[many.md:21]" not in output
+    assert "many.md:20" in box.seen and "many.md:21" not in box.seen
+    assert "many.md:21" not in box.lines
+    corrected = "查到了 [many.md:1]"
+    client = FakeLLM([call("search_notes", query="hit"), "编造 [many.md:21]", corrected])
+    result = run("查 hit", settings, client=client)
+    assert result.ok and result.answer == corrected and result.steps == 3
+    assert any(e["kind"] == "citation_failed" for e in events(result))
+
+
+@pytest.mark.parametrize("lines, hidden", [
+    (["x" * (6000 - len("[long.md:1] ")), "hidden"], "long.md:2"),
+    (["visible", "x" * 6100, "hidden"], "long.md:2"),
+    (["x" * 6100, "hidden"], "long.md:1"),
+])
+def test_read_note_only_trusts_complete_returned_lines(settings, lines, hidden):
+    from lab_agent.tools import Toolbox
+    (settings.notes_dir / "long.md").write_text("\n".join(lines), encoding="utf-8")
+    box = Toolbox(settings.notes_dir, settings.output_dir, lambda *_: False)
+    output = box.read_note("long.md")
+    assert len(output) <= 6000 and hidden not in box.seen and hidden not in box.lines
+    expected = {"long.md:1"} if len(lines[0]) + len("[long.md:1] ") <= 6000 else set()
+    assert box.seen == expected
+    if not expected:
+        assert "search_notes" in output
+    assert check_citations(f"编造 [{hidden}]", box.seen)
+    for locator in box.seen:
+        assert f"[{locator}] {box.lines[locator].strip()}" in output
+    client = FakeLLM([call("read_note", path="long.md"), f"编造 [{hidden}]", "未找到"])
+    result = run("读资料", settings, client=client)
+    assert result.ok and result.answer == "未找到" and result.steps == 3
+    assert any(e["kind"] == "citation_failed" for e in events(result))
+
+
 def test_output_only_price_enables_cost_limit(settings):
     from lab_agent.agent import Budget
     budget = Budget(replace(settings, price_input=0, price_output=1000, max_cost_usd=0.01))
@@ -1179,7 +1230,7 @@ uv sync --locked
 uv run pytest -q
 ```
 
-应看到 `20 passed`。
+应看到 `24 passed`。
 
 第二步，故意配错，看报错是否友好（应该提示缺少 `LLM_API_KEY`，退出码为 2）：
 

@@ -338,7 +338,10 @@ def make_search(ctx: Context) -> Callable:
         """在本地资料里搜索关键词，返回“文件:行号: 内容”"""
         hits = []
         for f in sorted(WORKDIR.rglob("*.md")):
-            for no, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
+            target = f.resolve()
+            if not target.is_relative_to(WORKDIR) or not target.is_file():
+                continue                    # 跳过越界符号链接、断链和目录
+            for no, line in enumerate(target.read_text(encoding="utf-8").splitlines(), 1):
                 if query.lower() in line.lower():
                     source = f"{f.relative_to(WORKDIR)}:{no}"
                     ctx.seen_sources.add(source)
@@ -682,6 +685,21 @@ def test_only_returned_sources_are_trusted():
     assert "many.md:20" in ctx.seen_sources and "many.md:21" not in ctx.seen_sources
 
 
+def test_search_rejects_external_links_and_non_files(tmp_path):
+    outside = tmp_path / "outside.md"
+    outside.write_text("auditsecret outside", encoding="utf-8")
+    (ma.WORKDIR / "external.md").symlink_to(outside)
+    (ma.WORKDIR / "broken.md").symlink_to(tmp_path / "missing.md")
+    (ma.WORKDIR / "folder.md").mkdir()
+    local = ma.WORKDIR / "local.md"
+    local.write_text("auditsecret local", encoding="utf-8")
+    (ma.WORKDIR / "alias.md").symlink_to(local)
+    ctx = ma.make_context(FakeLLM([]))
+    output = ma.make_search(ctx)("auditsecret")
+    assert "outside" not in output and "external.md:1" not in ctx.seen_sources
+    assert "local.md:1: auditsecret local" in output and "alias.md:1" in ctx.seen_sources
+
+
 def test_bad_reference_skips_reviewer_call():
     bad = json.dumps({"title": "t", "body": "样本B是1.37 [F9]。"}, ensure_ascii=False)
     state, ctx = ma.run_pipeline("写简报", FakeLLM([PLAN, SEARCH, NOTES, bad, DRAFT, PASS]))
@@ -727,7 +745,7 @@ def test_langgraph_version_takes_the_same_path():
 
 </details>
 
-运行后应看到 `17 passed`：
+运行后应看到 `18 passed`：
 
 ```bash
 uv run pytest test_multi_agent.py -q
