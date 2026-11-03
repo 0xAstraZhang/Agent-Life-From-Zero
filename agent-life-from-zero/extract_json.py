@@ -9,9 +9,9 @@ SYSTEM = """从用户的实验记录里抽取测量数据，只输出 json，不
 示例输入：样本A的OD600是0.82
 示例输出：{"sample": "A", "measure": "OD600", "value": 0.82}"""
 
-def extract(text:str, retrys:int = 2) -> dict:
+def extract(text:str, retry:int = 2) -> dict:
     messages = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": text}] 
-    for attempt in range(1, retrys + 2):
+    for attempt in range(0, retry + 1):
         resp = client.chat.completions.create(
             model=MODEL, messages=messages, 
             response_format={"type": "json_object"}, max_tokens=500
