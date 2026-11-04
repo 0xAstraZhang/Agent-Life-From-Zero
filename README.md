@@ -28,7 +28,3 @@ uv run agent-life-from-zero/extract_json.py
 - 教程的代码按章节逐步写进 `agent-life-from-zero/minicode/`，每章都附有用假模型的离线测试；`pytest`、`mcp` 等依赖在用到的章节里安装。环境准备见 [教程目录](docs/README.md#开始之前环境准备)。
 
 官方参考：[OpenAI Python SDK](https://github.com/openai/openai-python)、[DeepSeek JSON Output](https://api-docs.deepseek.com/guides/json_mode/)。JSON mode 不等于字段 schema 校验，空白输出和截断输出也需要处理。
-
-## 随附参考资料
-
-`docs/Hello-Agents-V1.0.3-20260717.pdf` 是第三方 Hello-Agents 教材的 2026-07-17 快照（720 页），不是本仓库逐页维护的当前文档。本次教程勘误未对该 PDF 做逐页全面复核，也未修改其内容；请以 [Hello-Agents 上游仓库](https://github.com/datawhalechina/hello-agents) 的当前版本为准。
