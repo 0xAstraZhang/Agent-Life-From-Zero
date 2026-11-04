@@ -1,5 +1,15 @@
 # 第 3 章：接入 OpenAI Chat Completions
 
+先回到教程仓库根目录，执行下面的导出命令；随后进入独立的本章目录。手写时保留自己的练习目录，用导出版本核对文件清单和差异：
+
+```bash
+uv run python scripts/check_tutorial.py --chapter 03 --export /tmp/minicode-ch03
+cd /tmp/minicode-ch03
+uv sync
+```
+
+以下运行和测试命令在本章练习目录中执行。目录只含第 00–03 章的代码与测试；文件增量由[阶段清单](../lessons/stages.json)记录。导出目标必须为空，不会覆盖已有练习。
+
 [上一章：统一工具](02-tools.md) · [目录](README.md) · [下一章：Responses](04-responses.md)
 
 前两章已经用 FakeModel 跑通工具循环。这一章把假模型换成 HTTP 服务。循环仍然只读取 `Message`、`ToolCall` 和 `ModelReply`。
@@ -10,13 +20,13 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| [providers/base.py](../minicode/providers/base.py) | 配置、HTTP 传输、参数解析、原始数据的回放规则 |
-| [providers/chat.py](../minicode/providers/chat.py) | Chat Completions 请求编码与响应解码 |
-| [providers/__init__.py](../minicode/providers/__init__.py) | 根据明确的协议名选择适配器 |
+| [providers/base.py](../lessons/stages/03/minicode/providers/base.py) | 配置、HTTP 传输、参数解析、原始数据的回放规则 |
+| [providers/chat.py](../lessons/stages/03/minicode/providers/chat.py) | Chat Completions 请求编码与响应解码 |
+| [providers/__init__.py](../lessons/stages/03/minicode/providers/__init__.py) | 根据明确的协议名选择适配器 |
 | [03_chat_completions.py](../examples/03_chat_completions.py) | 完整的离线 HTTP 工具往返 |
-| [test_providers.py](../tests/test_providers.py) | 请求格式和响应语义的契约测试 |
+| [test_ch03.py](../tests/test_ch03.py) | 请求格式和响应语义的契约测试 |
 
-先阅读 `base.py` 中的 `ModelConfig`、`parse_call`、`complete`，再阅读 `chat.py` 的 `encode` 和 `decode`。流式方法留到第 8 章。
+表中的链接都是本章可用的完整文件，不含未来的协议导入或流式方法。新增文件可按完整文件建立；已有文件按下面迁移步骤修改后，与本章版本逐项对照。后面的短代码块会明确标为替换代码或解释片段。
 
 ## 从阶段快照提取到正式模块
 
@@ -26,11 +36,11 @@
 
 | 原有代码 | 搬到哪里 | 本章需要的变化 |
 | --- | --- | --- |
-| ch01 的 Text、ToolCall、ToolResult、Message、ToolSpec、ModelReply 与两个取内容函数 | [types.py](../minicode/types.py) | 补上下面的错误、用量和回放字段 |
-| ch01 的 FakeModel、call 与调用 ID 计数器 | [testing.py](../minicode/testing.py) | 改为从 `.types` 导入类型，返回含 Usage 的回复 |
-| ch02 的 ToolContext、Tool、ToolRunner | [tool.py](../minicode/tool.py) | 改用 `.types`，在 schema 校验前处理参数解析错误 |
-| ch02 的 Agent | [agent.py](../minicode/agent.py) | 改用 `.types`，累计用量，在终结事件里报告错误原因 |
-| 新增的模型接口声明 | [model.py](../minicode/model.py) | 此时只声明 `complete()` |
+| ch01 的 Text、ToolCall、ToolResult、Message、ToolSpec、ModelReply 与两个取内容函数 | [types.py](../lessons/stages/03/minicode/types.py) | 补上下面的错误、用量和回放字段 |
+| ch01 的 FakeModel、call 与调用 ID 计数器 | [testing.py](../lessons/stages/03/minicode/testing.py) | 改为从 `.types` 导入类型，返回含 Usage 的回复 |
+| ch02 的 ToolContext、Tool、ToolRunner | [tool.py](../lessons/stages/03/minicode/tool.py) | 改用 `.types`，在 schema 校验前处理参数解析错误 |
+| ch02 的 Agent | [agent.py](../lessons/stages/03/minicode/agent.py) | 改用 `.types`，累计用量，在终结事件里报告错误原因 |
+| 新增的模型接口声明 | [model.py](../lessons/stages/03/minicode/model.py) | 此时只声明 `complete()` |
 
 新建空的 `minicode/__init__.py`，使目录成为 Python 包。如果你直接运行仓库的参考实现，这些文件已经存在；手写时按照上表逐个建立。
 
@@ -84,13 +94,13 @@ FakeModel 返回工具调用时，也使用同样的具名构造，只把 `messa
 
 ### 再迁移执行层和循环
 
-`ToolRunner.run()` 在查到工具之后、运行 schema 校验之前，先检查：
+`ToolRunner.run(self, request)` 保留第二章的参数名 `request`。把原来的“参数必须是对象”分支完整替换为下面这段；它仍放在查到工具之后、schema 校验之前：
 
 ```python
-if call.parse_error or not isinstance(call.arguments, dict):
+if request.parse_error or not isinstance(request.arguments, dict):
     return ToolResult(
-        call_id=call.id,
-        content=f"参数不是合法 JSON 对象：{call.parse_error or call.raw_arguments}",
+        call_id=request.id,
+        content=f"参数不是合法 JSON 对象：{request.parse_error or request.raw_arguments}",
         is_error=True,
     )
 ```
@@ -112,7 +122,7 @@ Protocol 描述依赖的能力，不要求 FakeModel 或适配器继承它。它
 
 从本章开始，示例统一使用 `minicode.types`、`minicode.testing`、`minicode.tool` 和 `minicode.agent`。**不要混用 `lessons.ch01.Message` 与 `minicode.types.Message`**：它们是不同的 Python 类，正式执行层的类型检查会拒绝阶段快照对象。
 
-本章先运行非流式 `complete()` 路径。仓库中的最终参考文件还包含第 8 章的 `StreamEvent`、`stream()` 与 Agent 的流式分支，手写到这里不需要提前加入它们；03–05 的示例都使用默认的非流式模式。消息落盘转换函数留到第 10 章再读。
+本章阶段目录只包含非流式 `complete()`：工厂只注册 Chat Completions，`demo.py` 调用 `Agent(model, runner)`，没有 `StreamEvent`、`stream` 构造参数或消息序列化函数。第 04、05 章才扩展工厂，第 08 章加入流式，第 10 章加入持久化。不要用仓库根目录的最终文件替代本章阶段版本。
 
 迁移完成后，先用正式 FakeModel 再跑一次“加法调用 → 回答”，再接下面的 HTTP 适配器：
 
@@ -156,7 +166,9 @@ config = ModelConfig(
 
 `base_url` 包含版本前缀，适配器再添加 `/chat/completions`。不要把完整 endpoint 填进 `base_url`，否则路径会重复。
 
-模型名称必须显式配置。不能因为换了 URL，就假定服务商支持相同模型、参数和工具能力。教程实现发送 `max_completion_tokens`；兼容服务若使用不同参数，应在明确的路由配置中扩展，而不要往 Agent 中加入服务商判断。
+模型名称必须显式配置。不能因为换了 URL，就假定服务商支持相同模型、参数和工具能力。`ModelConfig.chat_token_field` 控制输出上限字段：默认 OpenAI 使用 `max_completion_tokens`，DeepSeek 路由使用 `max_tokens`；其他兼容服务可以显式选择。它只影响协议请求，Agent 无需增加服务商判断。
+
+这是必须验证的行为：一个服务可能接受未知字段，却忽略它。测试应检查实际发出的字段；真实验收还应把上限设成很小的值，确认用量和停止原因符合限制。
 
 ## 第二步：编码内部消息
 
@@ -235,7 +247,7 @@ HTTP 返回的 `choices[0].message` 不能直接交给 Agent。`decode()` 要完
 
 ## 跑一次完整往返
 
-在仓库根目录运行：
+在本章练习目录运行：
 
 ```bash
 uv run python examples/03_chat_completions.py
@@ -248,7 +260,7 @@ openai-chat: 两次 HTTP 请求，一次本地工具调用
 结果是 5。
 ```
 
-打开 [demo.py](../minicode/providers/demo.py)，沿着 `run_demo()` 看一次完整过程：
+打开 [demo.py](../lessons/stages/03/minicode/providers/demo.py)，沿着 `run_demo()` 看一次完整过程：
 
 1. `httpx.MockTransport` 截获请求，代替真实网络。
 2. 第一次返回 `add` 调用。
@@ -261,14 +273,30 @@ openai-chat: 两次 HTTP 请求，一次本地工具调用
 ## 检查与练习
 
 ```bash
-uv run pytest tests/test_providers.py -k 'openai-chat' -q
+uv run python -m pytest tests/test_ch03.py -q
 ```
 
-测试覆盖工具往返、多调用、错误结果、无效参数、截断、拒绝和来源隔离。认证失败直接抛出 HTTP 错误，再由 Agent 产生错误事件；当前传输层没有自动重试。
+本章测试只导入当前已有模块，检查 Chat 工具往返及内部消息转换。读测试中的第二次请求，确认包含原调用和匹配 ID 的结果。认证失败直接抛出 HTTP 错误，再由 Agent 产生错误事件；当前传输层没有自动重试。
 
 练习：把假服务第一次的 `finish_reason` 改成 `length`。确认加法函数没有执行，再恢复正常响应。接着把 `arguments` 改成 `"{"`，观察它与截断的区别。
 
-真实调用可在第 16 章 CLI 中设置 `MINICODE_API=openai-chat`、`MINICODE_MODEL`、`MINICODE_BASE_URL` 和 `MINICODE_API_KEY`。当前只实现文本与本地 function 工具，未实现图像、音频和服务商托管工具。
+## 本章就接一次真实模型
+
+完整入口是 [live_model.py](../examples/live_model.py)，本章导出目录已经包含它。它仍然使用同一个加法工具，只把 MockTransport 换成真实 HTTP；不依赖第 16 章 CLI。
+
+如果终端已有 `LLM_MODEL`、`LLM_BASE_URL`、`LLM_API_KEY`，直接运行：
+
+```bash
+uv run python examples/live_model.py --env-prefix LLM --api openai-chat
+```
+
+如果使用教程配置，则准备同一组 `MINICODE_MODEL`、`MINICODE_BASE_URL`、`MINICODE_API_KEY`，把参数改为 `--env-prefix MINICODE`。入口要求选中的一组配置完整，不会把一家的 key 和另一家的 URL 拼在一起。密钥只从环境变量读取，不打印到终端。
+
+对于 `api.deepseek.com`，入口识别 DeepSeek 路由并选择 `max_tokens`。其他兼容服务需要不同字段时，可以显式加 `--chat-token-field max_tokens`。不要只以“请求返回 200”判断输出上限生效。
+
+模型应调用加法工具，再给出包含 5 的回答。程序检查实际发生了工具调用和最终状态，模型没有调用工具也会作为验收失败报告。真实请求会产生服务商费用；离线例子不请求服务。
+
+当前只实现文本与本地 function 工具，未实现图像、音频和服务商托管工具。第 16 章才把已经验证的这些模块组装成完整 CLI。
 
 源码参照：[pi 的 Chat 转换](https://github.com/earendil-works/pi/blob/676af1d777ef6f04b6bc8daf4cf3b9b1799cff4d/packages/ai/src/api/openai-completions.ts)将统一消息转换为协议消息；本章保留这一边界，并缩小支持范围。
 

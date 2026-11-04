@@ -15,15 +15,21 @@ uv run python examples/01_agent_loop.py
 uv run minicode --demo
 ```
 
-以上命令不需要 API Key，不访问模型服务。接着打开[教程目录](docs/README.md)，按顺序完成每章。`examples/` 是可运行的章节实验，`minicode/` 是完成教程后得到的实现，`tests/` 保存对应验收。
+以上命令用于预览成品，不需要 API Key。跟着手写时，打开[教程目录](docs/README.md)，每章只使用该阶段的完整文件与测试。例如导出第三章：
+
+```bash
+uv run python scripts/check_tutorial.py --chapter 3 --export /tmp/minicode-ch03
+```
+
+导出目录包含累计到本章的代码、测试和运行说明；不会复制后续模块。原仓库的 `minicode/` 是最终参考实现。
 
 ```text
 docs/          逐章解释：为什么加、怎么加、如何验收
 examples/      每章能单独运行的实验，默认使用假模型或假 HTTP 服务
-lessons/       前两章的独立阶段快照，保留从零构建过程
+lessons/       阶段清单与早期完整文件，记录每章新增和替换
 minicode/      最终代码：内核、协议适配、工具与扩展
 tests/         循环、协议、工具和端到端离线回归
-scripts/       文档链接与章节示例检查
+scripts/       阶段导出、隔离验收与文档链接检查
 ```
 
 ## 调用真实模型
@@ -45,9 +51,25 @@ export MINICODE_BASE_URL="https://api.openai.com/v1"
 
 在同一个终端通过环境变量设置 `MINICODE_API_KEY`，不要写进仓库。程序不会自动读取 `.env`。真实请求会产生服务商费用。
 
+从第三章就可以验证真实工具往返，不需要等到最终 CLI。若已有完整的 `LLM_MODEL`、`LLM_BASE_URL`、`LLM_API_KEY` 配置：
+
+```bash
+uv run python examples/live_model.py --env-prefix LLM --api openai-chat
+```
+
+这个入口只读取指定的一组配置，不混用不同来源的密钥。DeepSeek 的 Chat 请求使用 `max_tokens`；OpenAI 默认使用 `max_completion_tokens`。可通过 `--chat-token-field` 显式选择，CLI 对应环境变量为 `MINICODE_CHAT_TOKEN_FIELD`。具体说明见[第 03 章](docs/03-chat-completions.md)。
+
 ```bash
 uv run minicode --read-only -p "阅读 README，说明这个项目的结构"
 uv run minicode --stream
+```
+
+最终 CLI 默认读取 `MINICODE_*`。继续使用已有 DeepSeek `LLM_*` 配置时，明确传递来源和密钥变量名：
+
+```bash
+uv run minicode --api openai-chat --provider deepseek \
+  --model "$LLM_MODEL" --base-url "$LLM_BASE_URL" --api-key-env LLM_API_KEY \
+  --read-only -p "阅读 README，说明项目结构"
 ```
 
 交互模式会询问写文件和执行命令的权限。`-p` 非交互模式默认拒绝需要确认的工具；可以用 `--allow-tool Edit` 等参数显式允许某种操作。文件工具限制在工作目录内，**Bash 没有操作系统沙箱**；文件路径检查不能隔离 shell。
@@ -71,7 +93,7 @@ uv run python -m minicode.evals
 uv build
 ```
 
-离线测试验证确定的控制流和协议转换，不代表真实模型的任务成功率。在线评测与费用记录见[第 15 章](docs/15-evals.md)。
+章节检查在每章独立目录运行，并阻止导入仓库最终包，确保不借用未来代码。离线检查不代表真实模型的任务成功率；在线评测与费用记录见[第 15 章](docs/15-evals.md)。
 
 ## 实现范围
 

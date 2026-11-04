@@ -13,6 +13,19 @@
 它要求服务器支持这一版本，不把这个教学实现称为所有 MCP 版本的通用客户端。
 Streamable HTTP、OAuth、资源、提示词、sampling 和异步任务不在本章实现范围内。
 
+## 本章的完整累积目录
+
+导出只包含第 00–14 章文件的工作目录，再在里面运行示例和本章测试：
+
+```bash
+uv run python scripts/check_tutorial.py --chapter 14 --export /tmp/minicode-ch14
+cd /tmp/minicode-ch14
+uv sync
+uv run python -m pytest tests -q
+```
+
+目标必须是新目录或空目录。导出目录的 README 列出本章新增、替换的完整文件和实验命令。这些文件可直接编辑；隔离验收会阻止它从原仓库加载尚未学习的模块。
+
 ## 1. 模型适配与工具适配是两个方向
 
 ```text
@@ -140,14 +153,22 @@ MCP 工具可以声明 `readOnlyHint`。
 调用必须经过第 7 章的 PermissionRunner，由用户审批，或显式加入允许列表。
 只读子 Agent 默认无法使用这些未经本地验证的外部工具。
 
-连接入口同样明确：
+连接入口同样明确。下面是接入累积应用的完整组装段，沿用第 11 章的 `assemble()`、`permission_options` 和此前已有的 `tools` 列表：
 
 ```python
 with MCPClient([sys.executable, str(server)], name="demo") as client:
-    tools = client.list_tools()
-    inner = ToolRunner(tools, ToolContext(workspace))
-    runner = PermissionRunner(inner, allowed=["mcp__demo__echo"])
+    tools_with_mcp = [*tools, *client.list_tools()]
+    permission_options["allowed"] = (*permission_options["allowed"], "mcp__demo__echo")
+    runner = assemble(tools_with_mcp)
+    agent = Agent(model, runner, system_prompt)
+    for event in agent.run("调用 echo 工具"):
+        print(event)
 ```
+
+这里明确允许的是本章已知的 echo 工具，已有 allow 列表、只读模式、审批对象和 hooks 都保留。
+不要用远端工具列表覆盖原有编码工具、计划、Delegate 和 Skill。
+消费 Agent 事件必须在 `with` 内完成；退出后 MCP 进程已关闭，不能继续调用这些工具。
+本章的独立实验只注册 echo，便于观察进程通信；累积应用使用上面的追加方式。
 
 程序不会扫描项目配置并自动启动其中的命令。
 **启动 MCP 服务器本身就会执行本地程序**，发生在工具调用审批之前。

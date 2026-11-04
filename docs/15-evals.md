@@ -2,11 +2,24 @@
 
 上一章：[MCP](14-mcp.md) · [目录](README.md) · 下一章：[交付](16-shipping.md)
 
+## 本章的完整累积目录
+
+导出只包含第 00–15 章文件的工作目录，再在里面运行示例和本章测试：
+
+```bash
+uv run python scripts/check_tutorial.py --chapter 15 --export /tmp/minicode-ch15
+cd /tmp/minicode-ch15
+uv sync
+uv run python -m pytest tests -q
+```
+
+目标必须是新目录或空目录。导出目录的 README 列出本章新增、替换的完整文件和实验命令。这些文件可直接编辑；隔离验收会阻止它从原仓库加载尚未学习的模块。
+
 ## 这一章的结果
 
 到这里，模型可以通过三个协议使用同一套工具，还能保存会话和委派调查。现在需要回答：任务到底做成了吗？失败发生在协议、执行器，还是模型选择？下一次请求是否会超过可接受的用量？
 
-本章新增 [evals.py](../minicode/evals.py)、[budget.py](../minicode/budget.py)，实验是 [15_evals.py](../examples/15_evals.py)，验收见 [test_app.py](../tests/test_app.py)。
+本章新增 [evals.py](../minicode/evals.py)、[budget.py](../minicode/budget.py)，实验是 [15_evals.py](../examples/15_evals.py)，验收见 [预算测试](../tests/test_budget.py)和[任务验收](../tests/test_evals.py)。
 
 ## 第一步：把完成条件写成可检查的结果
 
@@ -124,7 +137,7 @@ uv run minicode --read-only --max-turns 5 --token-budget 10000 -p "阅读 README
 ## 验收与练习
 
 ```bash
-uv run python -m pytest tests/test_app.py -q
+uv run python -m pytest tests/test_budget.py tests/test_evals.py -q
 uv run python -m minicode.evals
 ```
 

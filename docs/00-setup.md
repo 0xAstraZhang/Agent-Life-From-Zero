@@ -6,11 +6,10 @@
 
 你会运行一个不联网的小程序，看见一条用户消息变成一条模型回复。先认识消息和请求，再在下一章让程序执行模型提出的工具调用。
 
-本章涉及三个文件：
+本章只需一个 Python 文件，依赖和环境由仓库配置提供：
 
 - [项目依赖](../pyproject.toml)：Python 版本、运行依赖和测试依赖。
 - [第 00 章实验](../examples/00_hello.py)：一次请求和回复。
-- [假模型](../minicode/testing.py)：返回可预测的结果，后面再读它的实现。
 
 ## 第一步：安装环境
 
@@ -47,20 +46,31 @@ uv run python examples/00_hello.py
 模型请求次数： 1
 ```
 
-程序的核心只有几行：
+在空目录中创建 `hello.py`，写入下面的完整代码。它不导入后续章节的任何文件：
 
 ```python
-from minicode.testing import FakeModel
-from minicode.types import Message, message_text
+from copy import deepcopy
 
-model = FakeModel(["你好，我是 minicode。"])
-reply = model.complete([Message.text("user", "你好")])
-print(message_text(reply.message))
+
+class ScriptedModel:
+    def __init__(self):
+        self.requests = []
+
+    def complete(self, messages):
+        self.requests.append(deepcopy(messages))
+        return {"text": "你好，我是 minicode。", "stop_reason": "stop"}
+
+
+model = ScriptedModel()
+reply = model.complete([{"role": "user", "text": "你好"}])
+print(reply["text"])
+print("停止原因：", reply["stop_reason"])
+print("模型请求次数：", len(model.requests))
 ```
 
-`Message.text("user", "你好")` 创建内部消息。`complete()` 返回内部回复，其中包括消息、用量、停止原因。这里没有任何服务商的字段；同一个调用方式后面会连接到三个适配器。
+用 `python hello.py` 运行手写版本。这里先用普通字典表达消息，`complete()` 接收消息列表并返回文本和停止原因。下一章才把这些数据改成明确的类型，真实接口加入时再记录用量。
 
-`FakeModel` 按给定剧本回复，不理解文本、不访问网络，也不收取费用。它的作用是把“循环写对了吗”和“模型选对动作了吗”分开验证。
+`ScriptedModel` 只返回固定文本，不理解输入，也不访问网络。下一章的 `FakeModel` 会进一步支持一段多轮剧本，用来检查 Agent 的控制流。
 
 ## 第三步：理解三个对象
 
@@ -108,7 +118,13 @@ assistant: 根据文件内容回答
 
 ## 验收与排错
 
-现在只要求第 00 章实验运行成功。完整测试是之后每章积累起来的，不要求第一次就理解全部测试。
+现在只要求第 00 章实验运行成功。还可以从仓库导出本阶段的完整工作目录：
+
+```bash
+uv run python scripts/check_tutorial.py --chapter 0 --export /tmp/minicode-ch00
+```
+
+目标必须为空目录或尚不存在；导出文件中的 README 给出当前阶段的安装和运行命令。默认验收会移除仓库导入路径，并禁止导入本阶段尚未出现的包。
 
 | 现象 | 检查 |
 | --- | --- |

@@ -1,13 +1,21 @@
-"""第 00 章：不联网，观察一次模型请求和回复。"""
-from minicode.testing import FakeModel
-from minicode.types import Message, message_text
+"""第 00 章：一个文件即可运行，不依赖尚未编写的 minicode 包。"""
+from copy import deepcopy
+
+
+class ScriptedModel:
+    def __init__(self):
+        self.requests = []
+
+    def complete(self, messages):
+        self.requests.append(deepcopy(messages))
+        return {"text": "你好，我是 minicode。", "stop_reason": "stop"}
 
 
 def main():
-    model = FakeModel(["你好，我是 minicode。"])
-    reply = model.complete([Message.text("user", "你好")])
-    print(message_text(reply.message))
-    print("停止原因：", reply.stop_reason)
+    model = ScriptedModel()
+    reply = model.complete([{"role": "user", "text": "你好"}])
+    print(reply["text"])
+    print("停止原因：", reply["stop_reason"])
     print("模型请求次数：", len(model.requests))
 
 

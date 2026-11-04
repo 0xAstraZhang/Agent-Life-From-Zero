@@ -9,6 +9,22 @@ Agent 已经能执行工具、保存历史和压缩请求。
 Hook 包装工具执行层，计划通过普通工具更新。
 它们都不读取 Chat Completions、Responses 或 Anthropic 的原始字段。
 
+这两个链接是本章首次引入的完整文件。下面的回调片段解释接口；“组合现有执行层”给出需要替换的完整组装段。
+本章示例只用一个待办工具展示行为；累积到自己的 Agent 时，保留原有工具列表和权限配置。
+
+## 本章的完整累积目录
+
+导出只包含第 00–11 章文件的工作目录，再在里面运行示例和本章测试：
+
+```bash
+uv run python scripts/check_tutorial.py --chapter 11 --export /tmp/minicode-ch11
+cd /tmp/minicode-ch11
+uv sync
+uv run python -m pytest tests -q
+```
+
+目标必须是新目录或空目录。导出目录的 README 列出本章新增、替换的完整文件和实验命令。这些文件可直接编辑；隔离验收会阻止它从原仓库加载尚未学习的模块。
+
 ## 先观察完成后的效果
 
 ```bash
@@ -98,17 +114,40 @@ def after(call, result):
 
 ## 第四步：组合现有执行层
 
+以下代码替换应用的组装段，在创建 Agent 前运行。
+此时 `runner` 是第 7 章留下的 `PermissionRunner`；第 9、10 章只改变模型上下文和会话，不替换它。
+先保存它的工具对象、上下文和权限设置，然后定义一个可复用的组装函数：
+
 ```python
 from minicode.hooks import HookRunner
 from minicode.permissions import PermissionRunner
+from minicode.tool import ToolRunner
 
-permission_runner = PermissionRunner(tool_runner, approval=approval)
-runner = HookRunner(permission_runner, before=before, after=after)
+tools = list(runner.tools.values())
+context = runner.context
+permission_options = {
+    "approval": runner.approval,
+    "read_only": runner.read_only,
+    "allowed": tuple(runner.allowed),
+}
+hook_options = {"before": before, "after": after}
+
+
+def assemble(current_tools):
+    inner = ToolRunner(current_tools, context)
+    permissions = PermissionRunner(inner, **permission_options)
+    return HookRunner(permissions, **hook_options)
+
+
+runner = assemble(tools)
 agent = Agent(model, runner)
 ```
 
 每一层只有一个职责。
 HookRunner 调用内层 runner，不直接调用 `tool.execute()`，所以无法意外跳过内层规则。
+`permission_options` 保留同一个审批对象、只读模式和显式授权；`hook_options` 保留本章的回调。
+后面增加工具时复用 `assemble()`，不要把最外层 runner 替换成裸 `ToolRunner`。
+这里是启动前的装配，不是在运行中的任务里新建 Agent；已经有对话历史时继续沿用原来的 Agent 和会话。
 
 ## 第五步：把计划做成一个工具
 
@@ -120,7 +159,14 @@ from minicode.planning import TodoList
 
 todo = TodoList()
 tools.append(todo.tool())
+permission_options["allowed"] = (*permission_options["allowed"], "TodoWrite")
+runner = assemble(tools)
+agent = Agent(model, runner)
 ```
+
+这是本章明确允许更新待办的配置，不是模型自己添加权限。
+`ToolRunner` 在构造时建立注册表，所以只向 `tools` 列表追加对象还不够，必须在创建 Agent 前重新组装。
+如果前面开启了只读模式，`read_only=True` 仍然优先，TodoWrite 继续被拒绝。
 
 工具参数本身用 JSON Schema 校验；跨条目的约束在执行函数中检查：
 
@@ -134,7 +180,7 @@ if sum(item["status"] == "in_progress" for item in args["items"]) > 1:
 
 `TodoWrite` 修改内存状态，因此没有标为只读。
 是否允许模型更新待办，由应用的权限配置决定。
-示例直接使用本地 ToolRunner；接入交互应用时可明确允许这个工具。
+示例使用 PermissionRunner 显式允许 TodoWrite；其余操作仍按已有权限配置处理。
 
 ## 第六步：计划模式必须落实到工具层
 
@@ -145,7 +191,7 @@ if sum(item["status"] == "in_progress" for item in args["items"]) > 1:
 ```python
 from minicode.planning import readonly_runner
 
-plan_runner = readonly_runner(permission_runner)
+plan_runner = readonly_runner(PermissionRunner(ToolRunner(tools, context), **permission_options))
 planner = Agent(model, plan_runner, "只调查现状并提出计划。")
 ```
 
@@ -164,11 +210,12 @@ planner = Agent(model, plan_runner, "只调查现状并提出计划。")
 ## 离线检查
 
 ```bash
-uv run pytest tests/test_extensions.py -k 'hook or todo' -q
+uv run pytest tests/test_hooks.py tests/test_planning.py -q
 ```
 
 测试会把 Read 改写成 Write，确认仍然被权限层拦截；
 还会检查 ID 不可改写、after 不能掩盖失败、多个进行中任务被拒绝，以及计划模式不能写文件。
+这些测试不导入子 Agent 或 Skills，完成第 11 章即可独立收集并运行。
 
 完整示例见 [11_hooks_planning.py](../examples/11_hooks_planning.py)。
 

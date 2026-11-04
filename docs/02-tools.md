@@ -1,5 +1,15 @@
 # 第 2 章：把工具从循环中拆出来
 
+先回到教程仓库根目录，执行下面的导出命令；随后进入独立的本章目录。手写时保留自己的练习目录，用导出版本核对文件清单和差异：
+
+```bash
+uv run python scripts/check_tutorial.py --chapter 02 --export /tmp/minicode-ch02
+cd /tmp/minicode-ch02
+uv sync
+```
+
+以下运行和测试命令在本章练习目录中执行。目录只含第 00–02 章的代码与测试；文件增量由[阶段清单](../lessons/stages.json)记录。导出目标必须为空，不会覆盖已有练习。
+
 上一章：[最小 Agent Loop](01-agent-loop.md) · 下一章：[Chat Completions 适配](03-chat-completions.md)
 
 第一章只有一个工具分支。这一章保留它的消息和假模型，将工具说明、注册、参数校验与执行拆出来。
@@ -227,10 +237,10 @@ uv run python examples/02_tools.py
 ## 6. 用同一组行为检查重构
 
 ```bash
-uv run pytest tests/test_lessons.py -q
+uv run python -m pytest tests/test_ch01.py tests/test_ch02.py -q
 ```
 
-同一套测试分别运行第一、二章：
+保留第一章测试，再用第二章独立测试检查同样的行为：
 
 - “读文件 → 工具结果 → 最终回答”仍然只需两轮。
 - 未知工具错误进入下一轮模型请求。

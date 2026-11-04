@@ -1,0 +1,211 @@
+{
+  "version": 1,
+  "stages": [
+    {
+      "chapter": 0,
+      "title": "环境与第一次交互",
+      "files": {
+        "examples/00_hello.py": "examples/00_hello.py",
+        "tests/test_ch00.py": "tests/test_ch00.py"
+      },
+      "example": "examples/00_hello.py"
+    },
+    {
+      "chapter": 1,
+      "title": "最小 Agent Loop",
+      "files": {
+        "examples/01_agent_loop.py": "examples/01_agent_loop.py",
+        "lessons/__init__.py": "lessons/__init__.py",
+        "lessons/ch01.py": "lessons/ch01.py",
+        "tests/test_ch01.py": "tests/test_ch01.py"
+      },
+      "example": "examples/01_agent_loop.py"
+    },
+    {
+      "chapter": 2,
+      "title": "统一工具系统",
+      "files": {
+        "examples/02_tools.py": "examples/02_tools.py",
+        "lessons/ch02.py": "lessons/ch02.py",
+        "tests/test_ch02.py": "tests/test_ch02.py"
+      },
+      "example": "examples/02_tools.py"
+    },
+    {
+      "chapter": 3,
+      "title": "Chat Completions",
+      "files": {
+        "examples/03_chat_completions.py": "examples/03_chat_completions.py",
+        "minicode/__init__.py": "minicode/__init__.py",
+        "examples/live_model.py": "examples/live_model.py",
+        "minicode/types.py": "lessons/stages/03/minicode/types.py",
+        "minicode/testing.py": "lessons/stages/03/minicode/testing.py",
+        "minicode/tool.py": "lessons/stages/03/minicode/tool.py",
+        "minicode/agent.py": "lessons/stages/03/minicode/agent.py",
+        "minicode/model.py": "lessons/stages/03/minicode/model.py",
+        "minicode/providers/base.py": "lessons/stages/03/minicode/providers/base.py",
+        "minicode/providers/chat.py": "lessons/stages/03/minicode/providers/chat.py",
+        "minicode/providers/__init__.py": "lessons/stages/03/minicode/providers/__init__.py",
+        "minicode/providers/demo.py": "lessons/stages/03/minicode/providers/demo.py",
+        "tests/test_ch03.py": "tests/test_ch03.py"
+      },
+      "example": "examples/03_chat_completions.py"
+    },
+    {
+      "chapter": 4,
+      "title": "Responses",
+      "files": {
+        "examples/04_responses.py": "examples/04_responses.py",
+        "minicode/providers/responses.py": "lessons/stages/04/minicode/providers/responses.py",
+        "minicode/providers/__init__.py": "lessons/stages/04/minicode/providers/__init__.py",
+        "minicode/providers/demo.py": "lessons/stages/04/minicode/providers/demo.py",
+        "tests/test_ch04.py": "tests/test_ch04.py"
+      },
+      "example": "examples/04_responses.py"
+    },
+    {
+      "chapter": 5,
+      "title": "Anthropic Messages",
+      "files": {
+        "examples/05_anthropic.py": "examples/05_anthropic.py",
+        "minicode/providers/anthropic.py": "lessons/stages/05/minicode/providers/anthropic.py",
+        "minicode/providers/__init__.py": "lessons/stages/05/minicode/providers/__init__.py",
+        "minicode/providers/demo.py": "lessons/stages/05/minicode/providers/demo.py",
+        "tests/test_ch05.py": "tests/test_ch05.py"
+      },
+      "example": "examples/05_anthropic.py"
+    },
+    {
+      "chapter": 6,
+      "title": "编码工具",
+      "files": {
+        "examples/06_coding_tools.py": "examples/06_coding_tools.py",
+        "minicode/coding_tools.py": "minicode/coding_tools.py",
+        "tests/test_coding_tools.py": "tests/test_coding_tools.py"
+      },
+      "example": "examples/06_coding_tools.py"
+    },
+    {
+      "chapter": 7,
+      "title": "权限",
+      "files": {
+        "examples/07_permissions.py": "examples/07_permissions.py",
+        "minicode/permissions.py": "minicode/permissions.py",
+        "tests/test_permissions.py": "tests/test_permissions.py"
+      },
+      "example": "examples/07_permissions.py"
+    },
+    {
+      "chapter": 8,
+      "title": "流式输出",
+      "files": {
+        "examples/08_streaming.py": "examples/08_streaming.py",
+        "minicode/types.py": "lessons/stages/08/minicode/types.py",
+        "minicode/agent.py": "lessons/stages/08/minicode/agent.py",
+        "minicode/model.py": "minicode/model.py",
+        "minicode/testing.py": "minicode/testing.py",
+        "minicode/providers/base.py": "minicode/providers/base.py",
+        "minicode/providers/chat.py": "minicode/providers/chat.py",
+        "minicode/providers/responses.py": "minicode/providers/responses.py",
+        "minicode/providers/anthropic.py": "minicode/providers/anthropic.py",
+        "minicode/providers/demo.py": "minicode/providers/demo.py",
+        "minicode/providers/__init__.py": "minicode/providers/__init__.py",
+        "tests/test_streaming.py": "tests/test_streaming.py",
+        "tests/test_providers.py": "tests/test_providers.py"
+      },
+      "example": "examples/08_streaming.py"
+    },
+    {
+      "chapter": 9,
+      "title": "上下文",
+      "files": {
+        "examples/09_context.py": "examples/09_context.py",
+        "minicode/context.py": "minicode/context.py",
+        "tests/test_context.py": "tests/test_context.py"
+      },
+      "example": "examples/09_context.py"
+    },
+    {
+      "chapter": 10,
+      "title": "会话与压缩",
+      "files": {
+        "examples/10_sessions.py": "examples/10_sessions.py",
+        "minicode/types.py": "minicode/types.py",
+        "minicode/agent.py": "minicode/agent.py",
+        "minicode/session.py": "minicode/session.py",
+        "minicode/compact.py": "minicode/compact.py",
+        "tests/test_session.py": "tests/test_session.py",
+        "tests/test_compact.py": "tests/test_compact.py",
+        "tests/test_core.py": "tests/test_core.py"
+      },
+      "example": "examples/10_sessions.py"
+    },
+    {
+      "chapter": 11,
+      "title": "Hooks 与规划",
+      "files": {
+        "examples/11_hooks_planning.py": "examples/11_hooks_planning.py",
+        "minicode/hooks.py": "minicode/hooks.py",
+        "tests/test_hooks.py": "tests/test_hooks.py",
+        "minicode/planning.py": "minicode/planning.py",
+        "tests/test_planning.py": "tests/test_planning.py"
+      },
+      "example": "examples/11_hooks_planning.py"
+    },
+    {
+      "chapter": 12,
+      "title": "子 Agent",
+      "files": {
+        "examples/12_subagents.py": "examples/12_subagents.py",
+        "minicode/subagents.py": "minicode/subagents.py",
+        "tests/test_subagents.py": "tests/test_subagents.py"
+      },
+      "example": "examples/12_subagents.py"
+    },
+    {
+      "chapter": 13,
+      "title": "Skills",
+      "files": {
+        "examples/13_skills.py": "examples/13_skills.py",
+        "minicode/skills.py": "minicode/skills.py",
+        "tests/test_skills.py": "tests/test_skills.py"
+      },
+      "example": "examples/13_skills.py"
+    },
+    {
+      "chapter": 14,
+      "title": "MCP",
+      "files": {
+        "examples/14_mcp.py": "examples/14_mcp.py",
+        "minicode/mcp.py": "minicode/mcp.py",
+        "examples/mcp_demo_server.py": "examples/mcp_demo_server.py",
+        "tests/test_mcp.py": "tests/test_mcp.py"
+      },
+      "example": "examples/14_mcp.py"
+    },
+    {
+      "chapter": 15,
+      "title": "评测与预算",
+      "files": {
+        "examples/15_evals.py": "examples/15_evals.py",
+        "minicode/budget.py": "minicode/budget.py",
+        "tests/test_budget.py": "tests/test_budget.py",
+        "minicode/evals.py": "minicode/evals.py",
+        "tests/test_evals.py": "tests/test_evals.py"
+      },
+      "example": "examples/15_evals.py"
+    },
+    {
+      "chapter": 16,
+      "title": "交付",
+      "files": {
+        "examples/16_shipping.py": "examples/16_shipping.py",
+        "minicode/cli.py": "minicode/cli.py",
+        "minicode/__main__.py": "minicode/__main__.py",
+        "tests/test_app.py": "tests/test_app.py",
+        "tests/test_provider_config.py": "tests/test_provider_config.py"
+      },
+      "example": "examples/16_shipping.py"
+    }
+  ]
+}

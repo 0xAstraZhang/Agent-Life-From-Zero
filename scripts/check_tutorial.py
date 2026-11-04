@@ -1,16 +1,16 @@
-"""核对本地链接、阶段入口，并在独立进程运行每个离线章节实验。"""
+"""检查链接，并按累积清单逐章导出、隔离运行示例与回归测试。"""
+import argparse
 from pathlib import Path
 import re
-import subprocess
 import sys
+import tempfile
 
-ROOT = Path(__file__).resolve().parents[1]
+from stages import ROOT, export_stage, load_stages, verify_stage
 
 
-def main():
+def check_links():
     errors = []
     for path in [ROOT / "README.md", *sorted((ROOT / "docs").glob("*.md"))]:
-        # 排除代码块，防止把示例中的 Markdown 当作页面导航。
         prose = re.sub(r"```.*?```", "", path.read_text(encoding="utf-8"), flags=re.S)
         for target in re.findall(r"\[[^\]]*\]\(([^)]+)\)", prose):
             target = target.split("#", 1)[0]
@@ -18,23 +18,38 @@ def main():
                 continue
             if not (path.parent / target).is_file():
                 errors.append(f"失效链接 {path.relative_to(ROOT)} -> {target}")
-    examples = sorted((ROOT / "examples").glob("[0-9][0-9]_*.py"))
-    if [p.name[:2] for p in examples] != [f"{i:02}" for i in range(17)]:
-        errors.append("00–16 每章必须恰好有一个实验入口")
-    for path in examples:
+    return errors
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--chapter", type=int, choices=range(17), help="只验收指定章，仍带入此前文件")
+    parser.add_argument("--export", type=Path, help="导出指定阶段到不存在或空的目录")
+    args = parser.parse_args(argv)
+    if args.export is not None:
+        if args.chapter is None:
+            parser.error("--export 需要同时指定 --chapter")
         try:
-            result = subprocess.run([sys.executable, str(path)], cwd=ROOT, text=True,
-                                    capture_output=True, timeout=30)
-            if result.returncode:
-                errors.append(f"{path.name} 失败：\n{result.stdout}\n{result.stderr}")
-            else:
-                print(f"PASS {path.name}")
-        except subprocess.TimeoutExpired:
-            errors.append(f"{path.name} 超过 30 秒")
+            destination = export_stage(args.chapter, args.export)
+        except ValueError as error:
+            parser.error(str(error))
+        print(f"已导出第 {args.chapter:02} 章到 {destination}；运行步骤见该目录的 README.md")
+        return 0
+    errors = check_links()
+    chapters = [args.chapter] if args.chapter is not None else list(range(17))
+    for chapter in chapters:
+        with tempfile.TemporaryDirectory(prefix=f"minicode-ch{chapter:02}-") as temporary:
+            try:
+                stage = export_stage(chapter, Path(temporary))
+                outputs = verify_stage(chapter, stage)
+                summary = outputs[-1].splitlines()[-1]
+                print(f"PASS 第 {chapter:02} 章：独立示例 + 累积测试（{summary}）", flush=True)
+            except Exception as error:
+                errors.append(str(error))
     if errors:
         print("\n".join(errors), file=sys.stderr)
         return 1
-    print(f"本地链接有效，{len(examples)} 个离线章节实验通过")
+    print(f"本地链接有效，{len(chapters)} 个阶段通过隔离验收")
     return 0
 
 

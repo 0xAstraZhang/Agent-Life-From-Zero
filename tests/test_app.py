@@ -1,15 +1,9 @@
 import json
 import pytest
 
-from minicode.budget import Budget, BudgetModel
 from minicode.cli import main
-from minicode.evals import run_evals
 from minicode.testing import FakeModel
-from minicode.types import Message, ModelReply, Usage
-
-
-def test_evals_check_real_files_and_expected_denials():
-    assert all(result["passed"] for result in run_evals())
+from minicode.types import Message
 
 
 def test_demo_json_and_session_resume(tmp_path, capsys):
@@ -34,19 +28,6 @@ def test_demo_stream_has_deltas_before_result(tmp_path, capsys):
     assert any(e["type"] == "text_delta" for e in events)
     assert len([e for e in events if e["type"] == "result"]) == 1
     assert events[-1]["status"] == "success"
-
-
-def test_budget_blocks_next_request_and_stream_counts_once():
-    reply = ModelReply(Message.text("assistant", "done"), Usage(8, 2), "stop")
-    fake = FakeModel([reply, "must not run"])
-    budget = Budget(10)
-    model = BudgetModel(fake, budget)
-    events = list(model.stream([Message.text("user", "hello")]))
-    assert events[-1].type == "done"
-    assert budget.usage == Usage(8, 2)
-    with pytest.raises(RuntimeError, match="预算"):
-        model.complete([Message.text("user", "again")])
-    assert len(fake.requests) == 1
 
 
 def test_cli_resume_refreshes_explicit_context(tmp_path, monkeypatch, capsys):
@@ -92,18 +73,3 @@ def test_cli_routes_and_subagent_isolation(api, tmp_path, monkeypatch, capsys):
     assert all("parent task" not in message_text(m) for m in child_request["messages"])
     events = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     assert events[-1]["status"] == "success" and "budget_usage" in events[-1]
-
-
-def test_budget_stream_close_releases_inner_generator():
-    from minicode.types import StreamEvent
-    closed = []
-    class Model:
-        def stream(self, messages, tools=()):
-            try:
-                yield StreamEvent("text_delta", text="partial")
-            finally:
-                closed.append(True)
-    stream = BudgetModel(Model(), Budget()).stream([])
-    next(stream)
-    stream.close()
-    assert closed == [True]

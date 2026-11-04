@@ -1,5 +1,15 @@
 # 第 9 章：上下文，让模型看到当前任务需要的信息
 
+先回到教程仓库根目录，执行下面的导出命令；随后进入独立的本章目录。手写时保留自己的练习目录，用导出版本核对文件清单和差异：
+
+```bash
+uv run python scripts/check_tutorial.py --chapter 09 --export /tmp/minicode-ch09
+cd /tmp/minicode-ch09
+uv sync
+```
+
+以下运行和测试命令在本章练习目录中执行。目录只含第 00–09 章的代码与测试；文件增量由[阶段清单](../lessons/stages.json)记录。导出目标必须为空，不会覆盖已有练习。
+
 上一章：[流式输出与中断](08-streaming.md) · 下一章：[会话与压缩](10-sessions-compaction.md)
 
 到这里，minicode 已经能通过三种协议调用模型、使用文件工具，并把文字逐步显示出来。
@@ -8,6 +18,12 @@
 
 本章增加 [context.py](../minicode/context.py)，把用户选择的项目说明放进请求上下文。
 不会修改三个协议适配器，也不会改工具的参数格式。
+
+## 本章文件清单
+
+保留上一章全部文件，新建 [minicode/context.py](../minicode/context.py)，新增[实验入口](../examples/09_context.py)和[本章测试](../tests/test_context.py)。这些链接是本章完整文件；导出目录中的同名文件内容一致。正文随后展示的是完整文件中的解释片段，不是省略了导入后还能单独运行的脚本。
+
+完成后运行本章命令，再执行 `uv run python -m pytest tests -q`，确认已有能力没有回退。不要把前面建立的模型、工具或权限对象全部丢掉重建；只在下文指定的位置增加本章能力。
 
 ## 这一章要验证什么
 
@@ -150,7 +166,7 @@ assert "pytest" in message_text(first_message)
 ## 离线检查
 
 ```bash
-uv run pytest tests/test_extensions.py -k project_instructions -q
+uv run python -m pytest tests/test_context.py -q
 ```
 
 这个测试覆盖：没有说明文件、成功读取、拒绝 `../` 越界、拒绝符号链接越界，以及长度限制。

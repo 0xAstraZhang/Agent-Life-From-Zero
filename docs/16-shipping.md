@@ -6,6 +6,14 @@
 
 这一章把前面独立验证的组件接成可安装的程序。最终入口是 [cli.py](../minicode/cli.py)，包配置在 [pyproject.toml](../pyproject.toml)。CLI 负责读配置、组装组件和显示事件，不复制 Agent Loop。
 
+本章新增 `cli.py`、`__main__.py`、控制台入口和 CLI 测试；保留第 15 章以前的全部模块。完整累积目录可在仓库根目录导出：
+
+```bash
+uv run python scripts/check_tutorial.py --chapter 16 --export /tmp/minicode-ch16
+```
+
+进入导出目录后运行 `uv sync` 安装本阶段程序，再执行以下命令。前面章节不会安装这个尚未实现的 CLI 入口。
+
 ## 第一步：检查最终依赖方向
 
 ```text
@@ -30,6 +38,7 @@ CLI 从环境变量读取默认模型配置，命令行参数可以覆盖它：
 | `--api-key-env` | 指定读取密钥的环境变量名，不接收明文密钥参数 |
 | `--cwd` | 文件工具和命令的工作目录 |
 | `--max-turns`、`--token-budget`、`--max-output-tokens` | 轮数、累计软预算、单次输出上限 |
+| `--chat-token-field` | Chat 协议的输出上限字段：`max_tokens` 或 `max_completion_tokens` |
 | `--read-only`、`--allow-tool` | 只读限制、显式工具授权 |
 | `--stream`、`--json` | 模型流式输出、逐行 JSON 运行事件 |
 | `--session`、`--resume` | 保存和恢复会话 |
@@ -37,6 +46,8 @@ CLI 从环境变量读取默认模型配置，命令行参数可以覆盖它：
 | `--mcp-command` | 显式启动一个 stdio MCP 服务 |
 
 `--json` 只是事件的输出格式；`--stream` 才决定是否向服务端请求 SSE。两者可以独立使用。
+
+`--provider deepseek` 默认选择 `max_tokens`，其他来源保留 OpenAI 的 `max_completion_tokens`；显式 `--chat-token-field` 优先。字段选择只在模型配置和适配器边界处理，不进入 Agent。环境变量 `MINICODE_CHAT_TOKEN_FIELD` 也可以设置该选项。
 
 CLI 用 `ExitStack` 管理 HTTP 客户端和 MCP 子进程的生命周期，正常退出、配置异常和用户中断都经过同一条清理路径。
 
@@ -116,6 +127,8 @@ uv build
 ```
 
 同时完成一次有记录的真实模型检查。离线检查不请求模型服务，不能代替在线协议兼容性、账户可用性和模型任务效果验证。
+
+其中 `scripts/check_tutorial.py` 在原教程仓库运行，用来验收所有阶段；导出的第 16 章工作目录按其 README 运行累计测试和当前实验即可。
 
 README 应包含：安装命令、三协议配置、离线示例、真实请求方式、权限行为、检查命令和实现范围。本仓库的 [README](../README.md) 就是对应成品。
 

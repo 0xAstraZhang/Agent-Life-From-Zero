@@ -1,5 +1,15 @@
 # 第 1 章：从一个空文件写出 Agent Loop
 
+先回到教程仓库根目录，执行下面的导出命令；随后进入独立的本章目录。手写时保留自己的练习目录，用导出版本核对文件清单和差异：
+
+```bash
+uv run python scripts/check_tutorial.py --chapter 01 --export /tmp/minicode-ch01
+cd /tmp/minicode-ch01
+uv sync
+```
+
+以下运行和测试命令在本章练习目录中执行。目录只含第 00–01 章的代码与测试；文件增量由[阶段清单](../lessons/stages.json)记录。导出目标必须为空，不会覆盖已有练习。
+
 上一章：[准备环境](00-setup.md) · 下一章：[统一工具系统](02-tools.md)
 
 本章从一个空 Python 文件开始：先定义消息，再写假模型，最后让程序读一个文件并回答问题。
@@ -252,10 +262,10 @@ uv run python examples/01_agent_loop.py
 ## 5. 验收出口
 
 ```bash
-uv run pytest tests/test_lessons.py -k 'stage or standalone' -q
+uv run python -m pytest tests/test_ch01.py -q
 ```
 
-测试用同一套场景检查第一、二章快照：工具往返、未知工具、截断、模型异常和轮数上限。
+本章测试只导入第一章快照，检查工具往返、未知工具、截断、模型异常和轮数上限；不需要先创建第二章文件。
 另外会把第一章源码复制到临时目录，在 Python 隔离模式下运行，证明它不需要最终 `minicode` 包。
 
 再修改剧本，观察结果：

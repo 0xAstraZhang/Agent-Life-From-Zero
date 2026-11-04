@@ -1,5 +1,15 @@
 # 第 5 章：接入 Anthropic Messages
 
+先回到教程仓库根目录，执行下面的导出命令；随后进入独立的本章目录。手写时保留自己的练习目录，用导出版本核对文件清单和差异：
+
+```bash
+uv run python scripts/check_tutorial.py --chapter 05 --export /tmp/minicode-ch05
+cd /tmp/minicode-ch05
+uv sync
+```
+
+以下运行和测试命令在本章练习目录中执行。目录只含第 00–05 章的代码与测试；文件增量由[阶段清单](../lessons/stages.json)记录。导出目标必须为空，不会覆盖已有练习。
+
 [上一章：Responses](04-responses.md) · [目录](README.md) · [下一章：编码工具](06-coding-tools.md)
 
 这一章接上第三种协议。它的工具调用是 assistant 消息中的 `tool_use` 块，工具结果则放进 user 消息的 `tool_result` 块。
@@ -8,13 +18,24 @@
 
 ## 本章新增什么
 
-实现：[providers/anthropic.py](../minicode/providers/anthropic.py)。
+实现：[providers/anthropic.py](../lessons/stages/05/minicode/providers/anthropic.py)。
 
 运行：[05_anthropic.py](../examples/05_anthropic.py)。
 
-检查：[test_providers.py](../tests/test_providers.py) 中参数化为 `anthropic-messages` 的测试。
+检查：[test_ch05.py](../tests/test_ch05.py) 中的 Messages 工具往返测试。
 
 按下面顺序阅读：认证请求头 → system 提取 → 内容块转换 → 结果合并 → 回复解码。流式部分在第 8 章展开。
+
+本章只新增或替换以下完整文件，其他文件保留上一章版本：
+
+| 操作 | 文件 |
+| --- | --- |
+| 新增适配器 | [providers/anthropic.py](../lessons/stages/05/minicode/providers/anthropic.py) |
+| 扩展协议注册 | [providers/__init__.py](../lessons/stages/05/minicode/providers/__init__.py) |
+| 增加本协议假 HTTP 数据 | [providers/demo.py](../lessons/stages/05/minicode/providers/demo.py) |
+| 新增实验与测试 | [本章实验](../examples/05_anthropic.py)、[本章测试](../tests/test_ch05.py) |
+
+工厂只注册截至本章已经创建的协议，实验仍调用非流式 `Agent(model, runner)`。下文的短数据块用于解释转换；可运行的完整文件以上表为准。
 
 ## 第一步：构造请求
 
@@ -128,16 +149,24 @@ anthropic-messages: 两次 HTTP 请求，一次本地工具调用
 ```
 
 ```bash
-uv run pytest tests/test_providers.py -k 'anthropic' -q
+uv run python -m pytest tests/test_ch05.py -q
 ```
 
-检查结果中至少应包含：顶层 system、`input_schema`、多结果合并、原生 `is_error`、截断不执行工具，以及原始签名的回放。
+本章测试检查完整 HTTP 往返、多个结果合并及原生 `is_error` 的保留。再阅读 `encode()` 中的顶层 system 和 `input_schema`，确认这些转换没有进入 Agent。截断回复不执行工具的内核约束继续由第三章测试保护。
 
 再一起跑三种协议：
 
 ```bash
-uv run pytest tests/test_providers.py -q
+uv run python -m pytest tests/test_ch03.py tests/test_ch04.py tests/test_ch05.py -q
 ```
+
+真实入口同样沿用第三章：
+
+```bash
+uv run python examples/live_model.py --env-prefix LLM --api anthropic-messages
+```
+
+DeepSeek 的 Messages 请求路径是 `/anthropic/v1/messages`；入口识别 DeepSeek 根地址时会选择 `https://api.deepseek.com/anthropic/v1` 作为此适配器的 base URL。连接其他服务时要显式配置其对应地址，不能把普通 OpenAI 根地址直接当成 Messages 地址。
 
 此时我们的第一项跨协议验收完成了：相同的 ToolRunner、Agent 和内部历史，通过三种编码方式完成同一种任务。
 

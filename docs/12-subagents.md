@@ -9,6 +9,21 @@
 先实现只读、串行、不允许嵌套的委派。
 上下文隔离、工具约束和共同预算清楚之后，再考虑更复杂的调度。
 
+`subagents.py` 是本章的完整新增文件。示例只展示父子请求顺序；接入累积应用时沿用上一章的 `tools`、`permission_options`、`assemble()`，不要重置已有权限和 hooks。
+
+## 本章的完整累积目录
+
+导出只包含第 00–12 章文件的工作目录，再在里面运行示例和本章测试：
+
+```bash
+uv run python scripts/check_tutorial.py --chapter 12 --export /tmp/minicode-ch12
+cd /tmp/minicode-ch12
+uv sync
+uv run python -m pytest tests -q
+```
+
+目标必须是新目录或空目录。导出目录的 README 列出本章新增、替换的完整文件和实验命令。这些文件可直接编辑；隔离验收会阻止它从原仓库加载尚未学习的模块。
+
 ## 本章验收
 
 ```bash
@@ -54,10 +69,21 @@ uv run python examples/12_subagents.py
 `subagent_tool()` 不创建固定的服务商客户端。
 应用传入两个工厂：模型工厂和工具执行层工厂。
 
+下面是工厂的解释片段，`budget` 在第五步建立。
+子执行器强制只读，继续使用父执行器的审批对象：
+
 ```python
+def child_runner(context):
+    return PermissionRunner(
+        ToolRunner(tools, context),
+        approval=permission_options["approval"],
+        read_only=True,
+    )
+
+
 delegate = subagent_tool(
     model_factory=lambda: child_model,
-    runner_factory=lambda context: permission_runner,
+    runner_factory=child_runner,
     max_turns=6,
     budget=budget,
 )
@@ -67,8 +93,9 @@ delegate = subagent_tool(
 由于子 Agent 从新上下文开始，这里不需要跨服务商搬运已有的推理数据。
 
 工具工厂接收父工具的 `ToolContext`，从而继续使用同一个工作区。
-它应当返回已经配置好的 PermissionRunner，复用同一个审批对象。
+它应当返回已经配置好的只读 PermissionRunner，复用同一个审批对象。
 不要在每个子 Agent 里创建不同的审批锁，否则多个确认输入可能同时出现。
+父应用的 before hook 不直接搬进子执行器；否则 hook 可能在外层只读检查之后改写工具名。需要给子 Agent 加 hook 时，把 hook 包在 `read_only=True` 的 PermissionRunner 外面，让改写后的请求也经过硬性只读限制。
 
 ## 第三步：只暴露真正只读的工具
 
@@ -113,10 +140,18 @@ child = Agent(
 本章使用容易验证的请求次数上限：每次真正调用模型前领取一个额度。
 
 ```python
+from minicode.subagents import BudgetModel, RequestBudget, subagent_tool
+
 budget = RequestBudget(limit=12)
 parent_model = BudgetModel(raw_parent_model, budget)
-delegate = subagent_tool(child_model_factory, runner_factory, budget=budget)
+delegate = subagent_tool(child_model_factory, child_runner, budget=budget)
+tools.append(delegate)
+runner = assemble(tools)
+agent = Agent(parent_model, runner)
 ```
+
+这段在启动任务前运行。`child_model_factory` 返回你已经配置好的子模型客户端；也可像离线示例一样返回一个新的 FakeModel。
+追加 Delegate 后仍通过第 11 章的 `assemble()` 组装父执行器，所以已有工具、权限设置和 hooks 都保留。
 
 父模型和每个子模型必须引用同一个 `budget` 对象。
 `RequestBudget.take()` 在锁内检查并增加计数，因此即使以后引入并行，也不会同时领取最后一个额度。
@@ -155,7 +190,7 @@ Delegate 返回子 Agent 的最终文本，最多 12,000 个字符。
 ## 离线检查
 
 ```bash
-uv run pytest tests/test_extensions.py -k 'subagent or shared_request_budget' -q
+uv run pytest tests/test_subagents.py -q
 ```
 
 测试让子模型主动调用 Write，检查实际没有写操作；

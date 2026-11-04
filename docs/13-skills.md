@@ -9,6 +9,19 @@ Agent 已经有执行动作的工具，也能把调查交给子 Agent。
 本章新增 [skills.py](../minicode/skills.py)，实现显式目录中的技能发现与按需读取。
 技能提供方法，工具提供动作，权限仍由执行层判断。
 
+## 本章的完整累积目录
+
+导出只包含第 00–13 章文件的工作目录，再在里面运行示例和本章测试：
+
+```bash
+uv run python scripts/check_tutorial.py --chapter 13 --export /tmp/minicode-ch13
+cd /tmp/minicode-ch13
+uv sync
+uv run python -m pytest tests -q
+```
+
+目标必须是新目录或空目录。导出目录的 README 列出本章新增、替换的完整文件和实验命令。这些文件可直接编辑；隔离验收会阻止它从原仓库加载尚未学习的模块。
+
 ## 先运行示例
 
 ```bash
@@ -20,10 +33,12 @@ uv run python examples/13_skills.py
 ```text
 - review: 检查改动是否满足验收标准。
 已加载评审步骤，现在检查差异。
+写入仍被拒绝，hooks 继续记录 Skill 和 Write。
 ```
 
 示例中的模型先看到技能简介，再通过 `Skill` 工具读取完整正文。
 正文进入普通工具结果，不会直接执行其中的命令。
+示例还在加技能前后各尝试一次未授权 Write，确认两次都被拒绝、文件没有创建，hooks 也继续收到调用记录。
 
 ## 第一步：约定一个足够简单的文件格式
 
@@ -82,11 +97,31 @@ catalog = library.catalog()
 ## 第三步：把目录交给模型
 
 把目录文本放进应用组装的提示词，同时注册一个 `Skill` 工具。
+这是对第 11、12 章组装代码的增量：`tools` 已包含原有编码工具、计划和 Delegate；`assemble()` 保留原来的审批对象、授权选项和 hooks。
 
 ```python
-runner = ToolRunner([*coding_tools, library.tool()], context)
+tools.append(library.tool())
+runner = assemble(tools)
 agent = Agent(model, runner, system_prompt + "\n可用技能：\n" + library.catalog())
 ```
+
+如果单独练习本章，需要建立完整执行层，不能直接把裸 `ToolRunner` 交给 Agent。下面是与上一章一致的完整组装函数；`context`、`permission_options` 和 `hook_options` 继续使用已有对象：
+
+```python
+from minicode.hooks import HookRunner
+from minicode.permissions import PermissionRunner
+from minicode.tool import ToolRunner
+
+
+def assemble(current_tools):
+    inner = ToolRunner(current_tools, context)
+    permissions = PermissionRunner(inner, **permission_options)
+    return HookRunner(permissions, **hook_options)
+```
+
+扩充的是内层注册表，最外层仍然是 `HookRunner → PermissionRunner → ToolRunner`。
+不要重新调用 `build_coding_tools()` 替换旧工具对象，否则读取文件的状态也会丢失。
+组装发生在新任务开始前；已有会话继续按第 10 章加载历史。
 
 工具参数很简单：
 
@@ -162,11 +197,11 @@ assert len(model.requests) == 2
 ## 离线检查
 
 ```bash
-uv run pytest tests/test_extensions.py -k skill -q
+uv run pytest tests/test_skills.py -q
 ```
 
 测试检查目录只显示简介、正文按需加载、拒绝路径穿越、拒绝符号链接越界、
-以及超长正文以错误结果返回。
+以及超长正文以错误结果返回。回归测试还验证新增 Skill 后，同一个审批对象仍在使用，旧工具对象没有替换，未授权 Write 仍然被拒绝，before/after hooks 继续执行。
 
 ## 开源实现中的对应边界
 

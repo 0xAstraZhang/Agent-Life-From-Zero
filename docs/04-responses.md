@@ -1,5 +1,15 @@
 # 第 4 章：接入 OpenAI Responses
 
+先回到教程仓库根目录，执行下面的导出命令；随后进入独立的本章目录。手写时保留自己的练习目录，用导出版本核对文件清单和差异：
+
+```bash
+uv run python scripts/check_tutorial.py --chapter 04 --export /tmp/minicode-ch04
+cd /tmp/minicode-ch04
+uv sync
+```
+
+以下运行和测试命令在本章练习目录中执行。目录只含第 00–04 章的代码与测试；文件增量由[阶段清单](../lessons/stages.json)记录。导出目标必须为空，不会覆盖已有练习。
+
 [上一章：Chat Completions](03-chat-completions.md) · [目录](README.md) · [下一章：Anthropic](05-anthropic.md)
 
 上一章已经有一个能调用真实 HTTP 接口的 Agent。这一章新增 `ResponsesModel`，保持 `Agent`、`ToolRunner` 和加法工具不变。
@@ -8,9 +18,20 @@
 
 ## 本章新增什么
 
-实现位于 [providers/responses.py](../minicode/providers/responses.py)。运行入口是 [04_responses.py](../examples/04_responses.py)。测试继续使用 [test_providers.py](../tests/test_providers.py)，因此新增协议没有复制另一套 Agent 测试。
+实现位于 [providers/responses.py](../lessons/stages/04/minicode/providers/responses.py)。运行入口是 [04_responses.py](../examples/04_responses.py)。新增 [test_ch04.py](../tests/test_ch04.py)，并保留第三章测试。测试可以共享内部类型，不能提前导入第五章模块。
 
 先实现 `encode()`，再实现 `decode()`，最后在 `create_model()` 中注册 `openai-responses`。第 8 章再读 `stream()`。
+
+本章只新增或替换以下完整文件，其他文件保留上一章版本：
+
+| 操作 | 文件 |
+| --- | --- |
+| 新增适配器 | [providers/responses.py](../lessons/stages/04/minicode/providers/responses.py) |
+| 扩展协议注册 | [providers/__init__.py](../lessons/stages/04/minicode/providers/__init__.py) |
+| 增加本协议假 HTTP 数据 | [providers/demo.py](../lessons/stages/04/minicode/providers/demo.py) |
+| 新增实验与测试 | [本章实验](../examples/04_responses.py)、[本章测试](../tests/test_ch04.py) |
+
+工厂只注册截至本章已经创建的协议，实验仍调用非流式 `Agent(model, runner)`。下文的短数据块用于解释转换；可运行的完整文件以上表为准。
 
 ## 第一步：认识三个不同的 item
 
@@ -127,16 +148,20 @@ openai-responses: 两次 HTTP 请求，一次本地工具调用
 对照上一章入口，两者只改变了传入 `run_demo()` 的协议名。加法函数、Agent 和 ToolRunner 完全相同。
 
 ```bash
-uv run pytest tests/test_providers.py -k 'responses' -q
+uv run python -m pytest tests/test_ch03.py tests/test_ch04.py -q
 ```
 
-重点看三组断言：
+重点看本章的两个测试：完整 HTTP 工具往返成功；item ID 不会被误用为结果的 `call_id`，原调用 item 的 ID 仍保留在下一次请求中。
 
-- 第一次响应中的 `fc_1` 不会被误用为结果的 `call_id`。
-- 原始 reasoning item 在同一路由未编辑历史中保留。
-- 修改内部参数或换模型后，不会回传旧原始参数和旧推理数据。
+再用本章已实现的 `remember()` / `replay()` 写两项练习测试：同来源未编辑消息保留原始 reasoning item；修改内部内容或切换模型后不回放旧的原始数据。
 
-这些测试不需要真实账号，也不会发送网络请求。真实接口仍需以账号可用模型进行冒烟验证。
+这些测试不需要真实账号，也不会发送网络请求。沿用第三章真实入口，只替换协议名：
+
+```bash
+uv run python examples/live_model.py --env-prefix LLM --api openai-responses
+```
+
+该命令要求选中的服务确实支持 Responses。DeepSeek 使用相同 API 根地址；其他服务请在所选环境变量组中设置它的 Responses 地址。入口不调用尚未出现的流式参数。
 
 ## 与开源实现对照
 

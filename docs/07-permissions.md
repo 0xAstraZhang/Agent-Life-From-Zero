@@ -1,10 +1,26 @@
 # 第 7 章：把权限放在工具执行之前
 
+先回到教程仓库根目录，执行下面的导出命令；随后进入独立的本章目录。手写时保留自己的练习目录，用导出版本核对文件清单和差异：
+
+```bash
+uv run python scripts/check_tutorial.py --chapter 07 --export /tmp/minicode-ch07
+cd /tmp/minicode-ch07
+uv sync
+```
+
+以下运行和测试命令在本章练习目录中执行。目录只含第 00–07 章的代码与测试；文件增量由[阶段清单](../lessons/stages.json)记录。导出目标必须为空，不会覆盖已有练习。
+
 上一章的工具已经能写文件和执行命令。现在需要决定：模型提出一次调用后，什么时候可以执行？
 
 本章增加 [permissions.py](../minicode/permissions.py)，把权限检查包装在 `ToolRunner` 外面。
 模型适配器和 Agent 循环不变。
 本章结束时，同一组工具可以用于交互模式、无人值守模式和只读模式。
+
+## 本章文件清单
+
+保留上一章全部文件，新建 [minicode/permissions.py](../minicode/permissions.py)，新增[实验入口](../examples/07_permissions.py)和[本章测试](../tests/test_permissions.py)。这些链接是本章完整文件；导出目录中的同名文件内容一致。正文随后展示的是完整文件中的解释片段，不是省略了导入后还能单独运行的脚本。
+
+完成后运行本章命令，再执行 `uv run python -m pytest tests -q`，确认已有能力没有回退。不要把前面建立的模型、工具或权限对象全部丢掉重建；只在下文指定的位置增加本章能力。
 
 ## 1. 请求执行与授权执行是两件事
 

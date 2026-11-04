@@ -30,6 +30,9 @@ def parser():
     p.add_argument("--provider", default=os.getenv("MINICODE_PROVIDER", "custom"))
     p.add_argument("--api-key-env", default="MINICODE_API_KEY")
     p.add_argument("--max-output-tokens", type=int, default=4096)
+    p.add_argument("--chat-token-field", choices=("max_tokens", "max_completion_tokens"),
+                   default=os.getenv("MINICODE_CHAT_TOKEN_FIELD"),
+                   help="Chat 输出上限字段；默认按 provider 选择")
     p.add_argument("--max-turns", type=int, default=20)
     p.add_argument("--token-budget", type=int, default=50_000)
     p.add_argument("--demo", action="store_true", help="运行固定的离线工具剧本，不请求模型")
@@ -99,7 +102,7 @@ def run(args, stack):
         default_url = "https://api.anthropic.com/v1" if args.api == "anthropic-messages" else "https://api.openai.com/v1"
         config = ModelConfig(args.api, args.model or "", args.base_url or default_url,
                              os.getenv(args.api_key_env, ""), provider=args.provider,
-                             max_tokens=args.max_output_tokens)
+                             max_tokens=args.max_output_tokens, chat_token_field=args.chat_token_field)
         base_model = create_model(config)
         stack.callback(base_model.close)
         source = base_model.source

@@ -26,7 +26,7 @@ class ChatCompletionsModel(HTTPModel):
                     "name": p.name, "arguments": arguments(p)}} for p in calls]
             wire.append(value)
         body = {"model": self.config.model, "messages": wire,
-                "max_completion_tokens": self.config.max_tokens}
+                self.config.chat_token_parameter: self.config.max_tokens}
         if tools:
             body["tools"] = [{"type": "function", "function": {
                 "name": t.name, "description": t.description, "parameters": t.parameters,

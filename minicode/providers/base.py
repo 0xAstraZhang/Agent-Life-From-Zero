@@ -20,12 +20,22 @@ class ModelConfig:
     provider: str = "custom"
     timeout: float = 60
     max_tokens: int = 4096
+    chat_token_field: str | None = None
 
     def __post_init__(self):
         if not self.model or not self.base_url or not self.api_key:
             raise ValueError("model、base_url 和 api_key 都必须设置")
         if self.timeout <= 0 or self.max_tokens <= 0:
             raise ValueError("timeout 和 max_tokens 必须大于 0")
+        if self.chat_token_field not in {None, "max_tokens", "max_completion_tokens"}:
+            raise ValueError("chat_token_field 只能是 max_tokens 或 max_completion_tokens")
+
+    @property
+    def chat_token_parameter(self) -> str:
+        """协议相同不代表参数完全相同；服务商差异停在模型配置边界。"""
+        if self.chat_token_field is not None:
+            return self.chat_token_field
+        return "max_tokens" if self.provider.lower() == "deepseek" else "max_completion_tokens"
 
 
 class ProtocolError(ValueError):
