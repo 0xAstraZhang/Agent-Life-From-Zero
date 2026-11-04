@@ -1,7 +1,23 @@
 [project]
 name = "agent-life-from-zero"
-version = "0.1.0"
-description = "从零学习 Agent 的教程与最小 Python 示例"
+version = "0.2.0"
+description = "从统一消息与三协议适配开始，逐步构建 Python Coding Agent"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = ["openai>=2.54.0"]
+dependencies = ["httpx>=0.28,<1", "jsonschema>=4.23,<5"]
+
+[project.scripts]
+minicode = "minicode.cli:main"
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["minicode"]
+
+[dependency-groups]
+dev = ["pytest>=8,<10"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

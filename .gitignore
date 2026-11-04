@@ -7,10 +7,17 @@ wheels/
 *.egg-info
 
 # Virtual environments
-.venv
+.venv/
+.venv-*/
 
 # Secrets
 .env
+.env.*
+!.env.example
+.minicode/
+.pytest_cache/
+.DS_Store
+.claude/
 
 # Isolated tutorial regression environment
 .venv-tutorial-tests/

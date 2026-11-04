@@ -1,6 +1,5 @@
-def main():
-    print("Hello from agent-life-from-zero!")
+from minicode.cli import main
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
