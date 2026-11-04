@@ -1,6 +1,6 @@
 # Agent Life From Zero
 
-从零学习 Agent 的中文教程与最小 Python 示例。学习路线见 [Agent Learning Hub](docs/Agent-Learning-Hub.md)，分阶段教程位于 `docs/Stage 1` 至 `docs/Stage 8` 对应的 Markdown 文件中。
+从零学习 Agent 的中文教程与最小 Python 示例。学习路线见 [Agent Learning Hub](docs/Agent-Learning-Hub.md)；实操教程是 [《照着 Claude Code 写一个 Agent》](docs/README.md)：拆解 Claude Code 的架构，分 12 章用 Python 从零写出一个 coding agent（minicode）。
 
 ## 运行现有示例
 
@@ -25,7 +25,7 @@ uv run agent-life-from-zero/extract_json.py
 
 - `chatbot.py`：多轮对话，输入 `exit` / `quit` 或结束标准输入退出。
 - `extract_json.py`：启用 JSON mode 后，继续验证 `sample`、`measure` 和有限数值 `value`；格式或字段失败时最多重试两次。网络、认证等 API 错误会直接抛给调用方，不是生产级重试实现。
-- 教程中的代码是分步骤教学片段，不等于已经整合好的完整应用。浏览器、检索和其他进阶章节依赖需按对应章节安装。
+- 教程的代码按章节逐步写进 `agent-life-from-zero/minicode/`，每章都附有用假模型的离线测试；`pytest`、`mcp` 等依赖在用到的章节里安装。环境准备见 [教程目录](docs/README.md#开始之前环境准备)。
 
 官方参考：[OpenAI Python SDK](https://github.com/openai/openai-python)、[DeepSeek JSON Output](https://api-docs.deepseek.com/guides/json_mode/)。JSON mode 不等于字段 schema 校验，空白输出和截断输出也需要处理。
 

@@ -2,7 +2,7 @@
 
 A curated AI Agent learning roadmap for people who want to build useful, reliable agents instead of collecting random links.
 
-本页是学习路线与资料索引；各阶段的实操教程见同目录的 Stage 1–8 文档，运行入口见仓库 README。目标是把社区里优秀分享、官方博客、论文、开源项目和真实工程经验，整理成一份可以照着执行的 AI Agent 学习 todo list。
+本页是学习路线与资料索引；实操教程见同目录的[《照着 Claude Code 写一个 Agent》](README.md)（第 1–12 章，教程目录里列出了每章对应的 Stage），运行入口见仓库 README。目标是把社区里优秀分享、官方博客、论文、开源项目和真实工程经验，整理成一份可以照着执行的 AI Agent 学习 todo list。
 
 ### Maintainer
 
@@ -13,6 +13,7 @@ Curated by [陈思州](https://github.com/jjyaoao) (Datawhale 成员) <a href="h
 - 如果你是新手：按「Learning Todo List」从上到下做，每完成一项就打勾。
 - 如果你已经会 LLM 应用：从 Stage 2 或 Stage 3 开始，重点补 Agent loop、工具调用、评测和工程化。
 - 如果你想做项目：直接看「Project Ladder」，每一档做一个可运行作品。
+- 如果你想边学边写：跟着[《照着 Claude Code 写一个 Agent》](README.md)从零写出一个 Claude Code 架构的 coding agent（对应 Project Ladder 第 6 档），Stage 1–8 的大部分练习都在其中。
 - 如果你只想找资料：看「Curated Resources」，优先读官方文档和经典论文。
 
 ### What To Learn Now
