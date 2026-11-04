@@ -117,7 +117,7 @@ def build_agent(cwd=".", *, llm=None, mode=None, allowed_tools=(), disallowed_to
     return agent
 ```
 
-价格从服务商的定价页查，单位是“每百万 token 多少美元”：
+子 agent 的用量会实时计入主 agent，所有子 agent 共用这一份预算（第 8 章）。价格从服务商的定价页查，单位是“每百万 token 多少美元”：
 
 ```bash
 export MINICODE_PRICE_INPUT=0.3
@@ -419,7 +419,7 @@ uv run python evals/run_evals.py evals/tasks.json --repeat 3
 
 每个失败的任务，`evals/results.jsonl` 里都有会话记录的路径，按上一步那张“分层”表去查原因。
 
-把任务扩充到 20 个以上，覆盖你真正关心的场景，这就是 Hub Stage 7 要求的那张评测表。之后**每次修改提示词、工具、模型之前和之后各跑一遍**，成功率下降就是回归。
+把任务扩充到 20 个以上，覆盖你真正关心的场景，这就是你的评测表。之后**每次修改提示词、工具、模型之前和之后各跑一遍**，成功率下降就是回归。
 
 ## 第 5 步：安全，按威胁逐个设防
 

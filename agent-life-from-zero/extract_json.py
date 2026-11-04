@@ -1,6 +1,6 @@
 #Who is JSON?
 
-import json, os
+import json, os, math
 from openai import OpenAI
 
 client = OpenAI(base_url=os.getenv("LLM_BASE_URL"), api_key=os.getenv("LLM_API_KEY"))
@@ -22,7 +22,9 @@ def extract(text:str, retry:int = 2) -> dict:
         except json.JSONDecodeError:
             print(f"第{attempt}次：不是合法JSON -> {raw!r}")
             continue
-        if isinstance(data.get("sample"), str) and isinstance(data.get("value"), (int, float)):
+        if (isinstance(data.get("sample"), str) and isinstance(data.get("measure"), str) 
+            and isinstance(data.get("value"), (int, float)) 
+            and (isinstance(data.get("value"), int)) or (math.isfinite(data.get("value")))):
             return data
         print(f"第{attempt}次：字段不对 -> {data}")
     raise ValueError("模型多次没有给出符合要求的JSON")

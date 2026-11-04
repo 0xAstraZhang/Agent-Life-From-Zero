@@ -9,7 +9,7 @@
 
 ## 为什么拿 Claude Code 当教材
 
-[Agent Learning Hub](Agent-Learning-Hub.md) 把 “Claude Code / Codex-style coding agents” 和 “Agent harness engineering” 列为当前最值得投入的两个方向。Claude Code 正好同时是这两样东西的样本：
+当前最值得投入的两个方向，一是 Claude Code、Codex 这类 coding agent，二是支撑它们的 harness 工程。Claude Code 正好同时是这两样东西的样本：
 
 - 它面对的是真实代码库、真实 shell，任何设计缺陷都会立刻暴露出来。
 - 它的机制有完整的公开文档（权限、hooks、记忆、子 agent、skills、MCP），可以逐条对照。
@@ -52,20 +52,20 @@ flowchart TD
 
 ## 章节目录
 
-| 章 | 主题 | 学完你能回答 | 对应 Hub 的 Stage |
-| --- | --- | --- | --- |
-| [1](01-agent-loop.md) | Agent Loop | agent 和聊天机器人差在哪？循环什么时候停？ | Stage 1 |
-| [2](02-tools.md) | 工具系统 | 为什么 Edit 要求先 Read？哪些工具可以并行？ | Stage 1、2 |
-| [3](03-permissions.md) | 权限系统 | `Bash(git *)` 能不能放行 `git log && rm -rf x`？ | Stage 3、7 |
-| [4](04-hooks.md) | Hooks | 怎样在不改 agent 代码的情况下拦住危险命令、强制跑测试？ | Stage 3 |
-| [5](05-context.md) | 上下文工程 | 为什么 Claude Code 不给代码库建向量索引？记忆文件放在哪？ | Stage 2 |
-| [6](06-session-compact.md) | 会话与压缩 | 进程崩了怎么接着做？上下文满了留下什么、丢掉什么？ | Stage 2、3 |
-| [7](07-planning.md) | 规划 | 待办清单为什么要交给 harness 管？plan 模式靠什么保证只读？ | Stage 4 |
-| [8](08-subagents.md) | 子 agent | 多 agent 的真正收益是什么？什么时候单 agent 更好？ | Stage 4 |
-| [9](09-skills.md) | Skills | skill 和 tool、prompt、MCP 有什么区别？上百个 skill 怎么不撑爆上下文？ | Stage 5 |
-| [10](10-mcp.md) | MCP | 一个 MCP 工具调用在线路上长什么样？怎么安全地让 agent 操作浏览器？ | Stage 5、6 |
-| [11](11-evals-safety.md) | 评测、可观测性与安全 | 改了提示词，怎么知道变好还是变坏？提示词注入怎么防？ | Stage 6、7 |
-| [12](12-shipping.md) | 交付 | 别人怎么装、怎么配、怎么在 CI 里用你的 agent？ | Stage 8 |
+| 章 | 主题 | 学完你能回答 |
+| --- | --- | --- |
+| [1](01-agent-loop.md) | Agent Loop | agent 和聊天机器人差在哪？循环什么时候停？ |
+| [2](02-tools.md) | 工具系统 | 为什么 Edit 要求先 Read？哪些工具可以并行？ |
+| [3](03-permissions.md) | 权限系统 | `Bash(git *)` 能不能放行 `git log && rm -rf x`？ |
+| [4](04-hooks.md) | Hooks | 怎样在不改 agent 代码的情况下拦住危险命令、强制跑测试？ |
+| [5](05-context.md) | 上下文工程 | 为什么 Claude Code 不给代码库建向量索引？记忆文件放在哪？ |
+| [6](06-session-compact.md) | 会话与压缩 | 进程崩了怎么接着做？上下文满了留下什么、丢掉什么？ |
+| [7](07-planning.md) | 规划 | 待办清单为什么要交给 harness 管？plan 模式靠什么保证只读？ |
+| [8](08-subagents.md) | 子 agent | 多 agent 的真正收益是什么？什么时候单 agent 更好？ |
+| [9](09-skills.md) | Skills | skill 和 tool、prompt、MCP 有什么区别？上百个 skill 怎么不撑爆上下文？ |
+| [10](10-mcp.md) | MCP | 一个 MCP 工具调用在线路上长什么样？怎么安全地让 agent 操作浏览器？ |
+| [11](11-evals-safety.md) | 评测、可观测性与安全 | 改了提示词，怎么知道变好还是变坏？提示词注入怎么防？ |
+| [12](12-shipping.md) | 交付 | 别人怎么装、怎么配、怎么在 CI 里用你的 agent？ |
 
 每一章的结构都一样：**导读 → Claude Code 是怎么做的 → 动手实现 → 跑起来 → 离线测试 → 和 Claude Code 的差别 → 自检清单、常见坑、进阶练习、资料来源**。
 

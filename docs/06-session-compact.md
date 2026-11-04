@@ -97,12 +97,16 @@ class Session:
         session = cls(cwd, session_id, home)
         if not session.path.exists():
             raise FileNotFoundError(f"找不到会话 {session_id}")
+        raw = session.path.read_bytes()
+        if raw and not raw.endswith(b"\n"):           # 崩溃时最后一行只写了一半：截掉，否则下一条会接在它后面一起坏掉
+            raw = raw[:raw.rfind(b"\n") + 1]
+            session.path.write_bytes(raw)
         messages = []
-        for line in session.path.read_text(encoding="utf-8").splitlines():
+        for line in raw.decode("utf-8").splitlines():
             try:
                 entry = json.loads(line)
             except json.JSONDecodeError:
-                continue                                  # 最后一行可能在崩溃时只写了一半
+                continue
             if entry["type"] == "compact":
                 messages = list(entry["messages"])
             elif entry["type"] == "message":
@@ -132,7 +136,7 @@ class Session:
 设计要点：
 
 - **只追加，不修改。** 每条消息一产生就写一行，进程随时崩溃，已经写下的都在。压缩也不删除旧内容，只是追加一个 `compact` 条目，里面是压缩后的完整消息列表。恢复时从最后一个快照开始往后读。
-- **容忍写了一半的行。** 进程在写最后一行时被杀掉，那一行可能不完整，`resume` 跳过解析不了的行。
+- **截掉写了一半的最后一行。** 进程在写最后一行时被杀掉，文件末尾会留下半行没有换行符的 JSON。`resume` 发现文件不是以换行结尾，就把这半行截掉；否则下一条新消息会直接接在它后面，两行一起变成坏数据，下次恢复时新消息就丢了。
 - **`parent_uuid` 串成链。** minicode 只是线性地读，但有了这条链，以后就能实现“从某一条消息分叉”（进阶练习 2）。
 
 回顾第 2 章的 `agent.py`：`_append` 在追加消息的同时调用 `self.session.append`，这个接缝从现在开始生效。
@@ -443,6 +447,16 @@ def test_resume_after_crash(tmp_path):
     resumed, messages = Session.resume(tmp_path)              # --continue：取最近的会话
     assert resumed.id == session.id and messages == agent.messages
     assert [m["role"] for m in messages] == ["system", "user", "assistant", "tool"]
+
+
+def test_half_written_last_line_is_dropped(tmp_path):
+    session = Session(tmp_path)
+    session.append({"role": "system", "content": "s"})
+    with session.path.open("a", encoding="utf-8") as f:
+        f.write('{"type": "message", "mess')                       # 崩溃时只写了一半
+    resumed, _ = Session.resume(tmp_path)
+    resumed.append({"role": "user", "content": "新消息"})
+    assert Session.resume(tmp_path)[1][-1] == {"role": "user", "content": "新消息"}
 
 
 def test_clear_old_tool_results_keeps_pairs():

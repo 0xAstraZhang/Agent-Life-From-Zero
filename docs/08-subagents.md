@@ -165,14 +165,13 @@ class AgentTool(Tool):
         tools = [t for t in parent.tools.values()
                  if t.name != self.name and (d.tools is None or t.name in d.tools)]   # 不允许再派子 agent
         system = build_system_prompt(ctx.cwd, getattr(parent.llm, "model", ""), base=d.prompt)
-        child = Agent(parent.llm, tools, system, cwd=ctx.cwd, max_turns=d.max_turns,
+        child = Agent(parent.llm, tools, system, cwd=ctx.cwd, max_turns=d.max_turns, price=parent.price,
                       permissions=parent.permissions, hooks=parent.hooks, ask_user=parent.ask_user,
-                      reminders=parent.reminders)
+                      reminders=parent.reminders, parent=parent)   # 用量实时计入父 agent，共用预算
         final = None
         for event in child.query(args["prompt"]):
             if event["type"] == "result":
                 final = event
-        parent.add_usage(child.usage["input_tokens"], child.usage["output_tokens"])
         if final is None:
             raise ToolError("子 agent 没有返回结果")
         stats = f"[子 agent {d.name}：{final['num_turns']} 轮，{sum(child.usage.values())} tokens]"
@@ -185,7 +184,7 @@ class AgentTool(Tool):
 
 | | 共享吗 | 为什么 |
 | --- | --- | --- |
-| 模型客户端 | 共享 | 同一个连接，用量也加到主 agent 头上 |
+| 模型客户端、价格、预算 | 共享 | 子 agent 的每次请求都实时计入主 agent 的用量；预算按最上层的 agent 算，子 agent 每一轮开始前都检查，并行的多个子 agent 也不会各花各的 |
 | 权限引擎、hooks、`ask_user` | 共享 | 子 agent 的每次工具调用都要过同样的检查，不能借子 agent 绕过权限 |
 | 消息历史 | **不共享** | 子 agent 从一条全新的消息开始，只知道 prompt 里写的内容 |
 | `ToolContext`（读过哪些文件、待办清单） | **不共享** | 子 agent 读过的文件不算主 agent 读过，主 agent 想改仍然要自己先 Read |
@@ -321,7 +320,7 @@ EOF
 
 ## 多 agent 协作的几条规矩
 
-如果你想搭更复杂的多 agent 流程（比如 Hub Stage 4 的 “research → write → review → revise”），下面几条比框架选择重要得多：
+如果你想搭更复杂的多 agent 流程（比如“调研 → 写作 → 审查 → 修改”这样的流水线），下面几条比框架选择重要得多：
 
 1. **先问能不能用一个 agent 做。** 任务之间依赖紧密、需要共享大量上下文时，拆开只会增加传话的损耗。
 2. **每个 agent 的输入输出要写成契约。** 报告里必须有什么（结论、证据、文件路径）、长度上限是多少，都写进系统提示词。上游的输出不可靠，下游再聪明也没用。
@@ -358,6 +357,16 @@ def test_subagent_has_own_context(tmp_path):
     assert [t["function"]["name"] for t in child["tools"]] == ["Read", "Grep"]
     assert "a.py 没有问题" in events[1]["content"]
     assert "print(1)" not in str(agent.messages)                           # 文件内容没进主上下文
+
+
+def test_subagents_share_the_budget(tmp_path):
+    llm = FakeLLM([call("Agent", description="查", prompt="查文件", subagent_type="explore")]
+                  + [call("Glob", pattern="*")] * 10 + ["报告", "完成"])
+    agent = Agent(llm, core_tools() + [AgentTool(load_agent_defs(tmp_path))], "s", cwd=tmp_path,
+                  max_budget_usd=0.0003, price=(0.1, 0.1))
+    events = list(agent.query("x"))
+    assert events[-1]["subtype"] == "error_max_budget_usd"
+    assert agent.cost_usd() < 0.0005                               # 子 agent 没有无视预算一直跑下去
 ```
 
 ```bash

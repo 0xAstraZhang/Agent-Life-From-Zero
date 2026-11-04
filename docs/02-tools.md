@@ -386,10 +386,13 @@ class Grep(Tool):
             raise ToolError(f"路径不存在：{base}")
         mode = args.get("output_mode") or "files_with_matches"
         limit = args.get("head_limit") or 100
+        permissions = getattr(ctx.agent, "permissions", None)     # 第 3 章之后才有
         out = []
         for f in _walk(base):
             if args.get("glob") and not fnmatch.fnmatch(f.name, args["glob"]):
                 continue
+            if permissions and permissions.hides(str(f), ctx):
+                continue                                    # 比如 deny 了 Read(.env)，就不能借 Grep 读到它
             if f.stat().st_size > MAX_FILE_BYTES:
                 continue
             try:
@@ -415,6 +418,8 @@ class Grep(Tool):
 这里没有向量数据库，也没有预先建好的索引。模型想找什么，就像人一样先 Glob 看看有哪些文件，再 Grep 搜关键词，最后 Read 读相关的几段。第 5 章会详细讲 Claude Code 为什么选择这种“现查现读”的方式。
 
 `SKIP_DIRS` 跳过依赖和缓存目录。不跳过的话，一次 `**/*.py` 可能返回 `.venv` 里的几千个文件，既慢又浪费上下文。
+
+Grep 里还有一处 `permissions.hides(...)` 的检查，第 3 章有了权限系统之后才生效：权限只检查 Grep 的起点目录，而 Grep 会递归读目录下的每个文件，所以要逐个文件确认它没有被 `Read` 的 deny 或 ask 规则挡住，否则 `deny: Read(.env)` 拦得住 Read，却拦不住 `Grep(pattern="API_KEY")` 把密钥搜出来。
 
 ## 第 4 步：Bash
 
@@ -526,7 +531,7 @@ class Agent:
     def __init__(self, llm, tools, system_prompt: str, *, cwd=".", max_turns: int = 50,
                  max_budget_usd: float | None = None, price: tuple[float, float] = (0.0, 0.0),
                  permissions=None, hooks=None, session=None, compactor=None,
-                 reminders=(), ask_user=None):
+                 reminders=(), ask_user=None, parent=None):
         self.llm = llm
         self.tools = {t.name: t for t in tools}
         self.messages: list[dict] = [{"role": "system", "content": system_prompt}]
@@ -538,6 +543,7 @@ class Agent:
         self.reminders = list(reminders)        # 每次请求前调用，返回要提醒模型的话
         self.pending_context: list[str] = []    # 附在下一条用户消息前面的上下文
         self.ask_user = ask_user or (lambda tool, args, reason: "no")   # 没人值守就一律拒绝
+        self.parent = parent                    # 第 8 章：子 agent 的用量实时计入父 agent，共用一份预算
         self.usage = {"input_tokens": 0, "output_tokens": 0}
         self.last_usage = None                  # 最近一次请求的 usage，第 6 章估算上下文用
         self.mark = 0                           # 最近一次请求返回时 messages 的长度
@@ -558,6 +564,9 @@ class Agent:
 
         stop_hook_active = False
         for turn in range(1, self.max_turns + 1):
+            if self._over_budget():                             # 并行的子 agent 可能已经把预算花完了
+                yield self._result("error_max_budget_usd", "花费已达到预算上限", turn - 1, started)
+                return
             yield from self._before_request()                   # 第 6 章：上下文快满时压缩
             try:
                 reply = self.llm.complete(self._request_messages(), self._schemas())
@@ -583,10 +592,9 @@ class Agent:
                     continue
                 yield self._result("success", msg.get("content") or "", turn, started)
                 return
-            if self.max_budget_usd is not None and self.cost_usd() >= self.max_budget_usd:
+            if self._over_budget():
                 self.repair("[预算已用完，这次调用没有执行]")
-                yield self._result("error_max_budget_usd", f"花费已达到上限 ${self.max_budget_usd}",
-                                   turn, started)
+                yield self._result("error_max_budget_usd", "花费已达到预算上限", turn, started)
                 return
             for call, result in self._run_tools(calls):
                 self._append({"role": "tool", "tool_call_id": call["id"], "content": _render(result)})
@@ -713,6 +721,15 @@ class Agent:
         with self._lock:                                        # 并行的子 agent 也会往这里加
             self.usage["input_tokens"] += input_tokens
             self.usage["output_tokens"] += output_tokens
+        if self.parent:                                         # 子 agent 的用量实时计入父 agent
+            self.parent.add_usage(input_tokens, output_tokens)
+
+    def _over_budget(self) -> bool:
+        """预算按最上层的 agent 算：所有子 agent 共用同一份。"""
+        root = self
+        while root.parent is not None:
+            root = root.parent
+        return root.max_budget_usd is not None and root.cost_usd() >= root.max_budget_usd
 
     def cost_usd(self) -> float:
         return (self.usage["input_tokens"] * self.price[0] + self.usage["output_tokens"] * self.price[1]) / 1e6
@@ -749,6 +766,7 @@ def _render(result: ToolResult) -> str:
 | `hooks` | 不运行任何 hook | 第 4 章 |
 | `reminders`、`pending_context` | 不附加任何提醒和上下文 | 第 5 章 |
 | `session`、`compactor` | 消息只在内存里，上下文不压缩 | 第 6 章 |
+| `parent` | 没有父 agent | 第 8 章：子 agent 的用量实时计入父 agent，预算按最上层算 |
 | `max_budget_usd`、`price` | 不限制花费 | 第 11 章 |
 
 还有几个小地方：

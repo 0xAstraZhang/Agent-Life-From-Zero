@@ -1,6 +1,6 @@
 # Agent Life From Zero
 
-从零学习 Agent 的中文教程与最小 Python 示例。学习路线见 [Agent Learning Hub](docs/Agent-Learning-Hub.md)；实操教程是 [《照着 Claude Code 写一个 Agent》](docs/README.md)：拆解 Claude Code 的架构，分 12 章用 Python 从零写出一个 coding agent（minicode）。
+从零学习 Agent 的中文教程与最小 Python 示例。教程是 [《照着 Claude Code 写一个 Agent》](docs/README.md)：拆解 Claude Code 的架构，分 12 章用 Python 从零写出一个 coding agent（minicode）。
 
 ## 运行现有示例
 

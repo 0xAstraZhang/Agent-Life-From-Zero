@@ -2,7 +2,7 @@
 
 ## 导读
 
-一个只能在你自己电脑上、靠你记得的一串命令跑起来的 agent，还不算一个真正的产品。Hub 的 Stage 8 给“真实可用”定了几条标准：有明确的用户、任务和成功标准；有日志、超时、成本上限；有权限边界和人工确认；有部署方式；有 README。
+一个只能在你自己电脑上、靠你记得的一串命令跑起来的 agent，还不算一个真正的产品。“真实可用”至少要满足这几条：有明确的用户、任务和成功标准；有日志、超时、成本上限；有权限边界和人工确认；有部署方式；有 README。
 
 前面十一章已经把能力和保障做齐了，这一章把它们包装成别人能用的东西：
 
@@ -329,7 +329,6 @@ README 是给“第一次见到这个项目的人”写的。下面是一个模�
 - **用真正的工具。** 现在你知道 Claude Code 的每个机制在做什么了，去读它的[官方文档](https://code.claude.com/docs/en/overview)，你会发现每一页都能对上号。需要在自己的产品里嵌入 agent 时，优先考虑 [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/agent-loop) 这类成熟的实现，而不是从零维护一个 minicode。
 - **读别人的实现。** [learn-claude-code](https://github.com/shareAI-lab/learn-claude-code) 用另一种方式从零复刻了同样的机制；[OpenAI Codex CLI](https://github.com/openai/codex)、[OpenHands](https://github.com/All-Hands-AI/OpenHands)、[Aider](https://github.com/Aider-AI/aider) 是完整的开源 coding agent。对照着读，看它们怎么处理权限、上下文和工具。
 - **换一个场景。** 把 minicode 的工具换掉：给研究助手配上搜索和引用校验，给运维助手配上只读的监控查询。harness 的结构不用变。
-- **回到路线图。** [Agent Learning Hub](Agent-Learning-Hub.md) 的 Project Ladder 列出了更多可以练手的项目。
 
 ## 资料来源
 
