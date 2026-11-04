@@ -1,6 +1,6 @@
-# 第 1 章：Agent Loop，一切从一个循环开始
+## 第 1 章：Agent Loop，一切从一个循环开始
 
-## 导读
+### 导读
 
 这一章写出 minicode 的第一版：一个约 90 行的 `agent.py`。它接收一个问题，让模型自己决定要不要调用 `list_files`、`read_file`，执行后把结果交回模型，一直循环到模型给出最终回答，并且能在出错和轮数用完时体面地停下。
 
@@ -15,7 +15,7 @@
 
 前置知识：Python 基础。你写过的 `chatbot.py`（多轮对话）和 `extract_json.py`（结构化输出）正好是这一章的起点。
 
-## Claude Code 是怎么做的
+### Claude Code 是怎么做的
 
 Claude Code 官方文档把它的工作方式描述成三个阶段：**收集上下文（gather context）、采取行动（take action）、验证结果（verify results）**，并且说这三个阶段 “blend together”：模型读一点、改一点、跑一下测试，再根据结果决定下一步，可以一口气串起几十个动作。
 
@@ -40,7 +40,7 @@ Claude Code 官方文档把它的工作方式描述成三个阶段：**收集上
 
 minicode 照搬这个设计：`query()` 是一个生成器，边跑边产出事件（`assistant`、`tool_result`），最后一定以一个 `result` 事件结束。这样命令行界面、非交互模式、测试和评测都消费同一串事件，彼此不用知道对方的存在。
 
-## 从你写过的 chatbot.py 说起
+### 从你写过的 chatbot.py 说起
 
 回顾两个已经知道的事实，它们是理解 agent loop 的全部前提：
 
@@ -64,7 +64,7 @@ OpenAI 兼容格式有三条硬规则，违反任何一条都会得到 400 错�
 2. 每个 `tool_call_id` 都必须有一条 tool 消息回应，工具失败也要回一条；
 3. tool 消息的 `content` 是字符串。
 
-## 第 1 步：模型客户端
+### 第 1 步：模型客户端
 
 新建 `minicode/__init__.py`：
 
@@ -125,7 +125,7 @@ class LLM:
 - **`model_dump(exclude_none=True)` 把整条消息原样存下来。** 不要自己拼 `{"role": "assistant", "content": ...}`：那样会丢掉 `tool_calls`，也会丢掉服务商的额外字段。比如 DeepSeek 的思考模式要求带工具的请求把 `reasoning_content` 原样传回，漏了就是 400。
 - **`max_retries=2`**：网络抖动、限流（429）、服务端 5xx 交给 SDK 自动重试。重试后仍然失败，才轮到主循环处理。
 
-## 第 2 步：假模型
+### 第 2 步：假模型
 
 真模型每次的回答都不一样，测不出确定的结论，还要花钱。所以从第一章开始就准备一个“按剧本回答”的假模型。
 
@@ -178,7 +178,7 @@ class FakeLLM:
 
 剧本的写法：`"字符串"` 是最终回答，`call("工具名", 参数=值)` 是一次工具调用，放进列表就是一次调用多个工具，放一个异常对象就是模拟出错。`requests` 记下了每一次请求的内容，测试里可以检查“模型在第二轮看到了什么”。
 
-## 第 3 步：最小的 agent loop
+### 第 3 步：最小的 Agent Loop
 
 新建 `minicode/agent.py`：
 
@@ -284,7 +284,7 @@ if __name__ == "__main__":
 
 `run_tool` 的原则是**任何失败都变成一段文字还给模型，而不是抛异常**。工具名写错、参数不是合法 JSON、文件不存在，这些都是模型能自己修正的错误：它看到“没有名为 xxx 的工具，可用的有 [...]”，下一轮通常就改对了。只有模型修不了的问题（网络断了、key 错了、轮数用完）才停下来告诉用户。
 
-## 跑起来
+### 跑起来
 
 在 `agent-life-from-zero/` 目录下运行（先按 [README](README.md) 配好环境变量）：
 
@@ -314,7 +314,7 @@ uv run python -m minicode.agent "这个目录里有哪些 Python 文件？chatbo
 
 注意：这一版的 `read_file` 能读任何路径，没有任何限制。它只是用来理解循环的，不要拿它处理不可信的输入。第 2 章会重写工具，第 3 章加上权限。
 
-## 离线测试
+### 离线测试
 
 新建 `tests/test_ch01.py`：
 
@@ -361,7 +361,7 @@ uv run python -m pytest tests/test_ch01.py -q
 
 三个测试分别覆盖了“正常出口”“错误交还模型”和两个“兜底出口”。第 2 章会把 `agent.py` 整个换掉，到时候删掉这个测试文件。
 
-## 和 Claude Code 的差别
+### 和 Claude Code 的差别
 
 | 方面 | Claude Code | 这一版 minicode |
 | --- | --- | --- |
@@ -379,14 +379,14 @@ uv run python -m pytest tests/test_ch01.py -q
 | 参数类型 | JSON 字符串，要 `json.loads` | JSON 字符串 | 对象，不用解析 | 对象，不用解析 |
 | 结果回传 | 单独的 `role: "tool"` 消息 | `function_call_output` 项 | user 消息里的 `tool_result` 块，可加 `is_error` | `function_response` part |
 
-## 自检清单
+### 自检清单
 
 - [ ] 能说出 `messages` 在一次两轮工具调用里依次多了哪几条消息。
 - [ ] 能解释为什么要把 assistant 消息整条存回，而不是只存 `content`。
 - [ ] 能说出循环的四个出口，以及哪些错误交还模型、哪些直接停下。
 - [ ] 能用 `FakeLLM` 写一个新测试：模型连续三次调用不存在的工具。
 
-## 常见坑
+### 常见坑
 
 | 现象 | 原因 | 解决 |
 | --- | --- | --- |
@@ -396,14 +396,14 @@ uv run python -m pytest tests/test_ch01.py -q
 | 模型总是凭记忆回答，不调工具 | 工具说明或系统提示词没写清楚什么时候该用 | 在系统提示词里写“回答前先用工具查证” |
 | `ModuleNotFoundError: minicode` | 没在 `agent-life-from-zero/` 目录下运行，或者没用 `python -m` | 先 `cd agent-life-from-zero`，用 `python -m minicode.agent` |
 
-## 进阶练习
+### 进阶练习
 
 1. **流式输出**：给 `LLM` 加一个 `stream=True` 的版本，文字边生成边打印。难点在于工具调用的参数也是分片到达的，要按 `index` 把 `tool_calls` 的片段拼起来。
 2. 在 `result` 事件里加上本次一共用了多少 token（累加每次的 `reply.usage`）。
 3. 把 `messages` 在结束时存成一个 JSON 文件。可回放的记录是调试 agent 最有用的东西，第 6 章会把它做成正式的会话记录。
 4. 用 Anthropic 的 Python SDK 重写一遍循环，对照上面的表。
 
-## 资料来源
+### 资料来源
 
 - [How Claude Code works](https://code.claude.com/docs/en/how-claude-code-works)
 - [How the agent loop works（Agent SDK）](https://code.claude.com/docs/en/agent-sdk/agent-loop)
