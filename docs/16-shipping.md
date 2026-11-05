@@ -4,7 +4,7 @@
 
 ## 这一章的结果
 
-这一章把前面独立验证的组件接成可安装的程序。本章的入口是 [cli.py](../lessons/stages/16/minicode/cli.py)，包配置在 [pyproject.toml](../pyproject.toml)。第 17 章会在这个文件里增加沙箱参数，最终版本见 [minicode/cli.py](../minicode/cli.py)。CLI 负责读配置、组装组件和显示事件，不复制 Agent Loop。
+这一章把前面独立验证的组件接成可安装的程序。本章的入口是 [cli.py](../lessons/stages/16/minicode/cli.py)，包配置在 [pyproject.toml](../pyproject.toml)。第 17 章增加沙箱参数，第 18 章再增加模型和运行控制；最终版本见 [minicode/cli.py](../minicode/cli.py)。CLI 负责读配置、组装组件和显示事件，不复制 Agent Loop。
 
 本章新增 `cli.py`、`__main__.py`、控制台入口和 CLI 测试；保留第 15 章以前的全部模块。完整累积目录可在仓库根目录导出：
 

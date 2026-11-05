@@ -19,7 +19,7 @@ uv run python -m pytest tests -q
 
 到这里，模型可以通过三个协议使用同一套工具，还能保存会话和委派调查。现在需要回答：任务到底做成了吗？失败发生在协议、执行器，还是模型选择？下一次请求是否会超过可接受的用量？
 
-本章新增 [evals.py](../minicode/evals.py)、[budget.py](../minicode/budget.py)，实验是 [15_evals.py](../examples/15_evals.py)，验收见 [预算测试](../tests/test_budget.py)和[任务验收](../tests/test_evals.py)。
+本章新增 [evals.py](../minicode/evals.py)、[budget.py](../lessons/stages/15/minicode/budget.py)，实验是 [15_evals.py](../examples/15_evals.py)，验收见 [预算测试](../tests/test_budget.py)和[任务验收](../tests/test_evals.py)。
 
 ## 第一步：把完成条件写成可检查的结果
 

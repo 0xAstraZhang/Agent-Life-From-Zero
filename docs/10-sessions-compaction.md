@@ -19,14 +19,14 @@ uv sync
 本章分别实现两件事：保存完整会话，以及生成较短的模型请求。
 它们使用同一套内部消息，但生命周期不同。
 
-本章新增 [session.py](../minicode/session.py) 和 [compact.py](../minicode/compact.py)，并扩充两个已有文件：
+本章新增 [session.py](../minicode/session.py) 和 [compact.py](../lessons/stages/10/minicode/compact.py)，并扩充两个已有文件：
 
 | 操作 | 完整文件 | 增量 |
 | --- | --- | --- |
-| 替换 | [types.py](../minicode/types.py) | 新增 `message_to_dict()` 与 `message_from_dict()` |
-| 替换 | [agent.py](../minicode/agent.py) | 构造函数增加 `history=None`，允许注入已加载的内部消息 |
+| 替换 | [types.py](../lessons/stages/10/minicode/types.py) | 新增 `message_to_dict()` 与 `message_from_dict()` |
+| 替换 | [agent.py](../lessons/stages/10/minicode/agent.py) | 构造函数增加 `history=None`，允许注入已加载的内部消息 |
 | 新增 | [session.py](../minicode/session.py) | 版本检查、配对校验、快照写入和恢复包装器 |
-| 新增 | [compact.py](../minicode/compact.py) | 生成模型请求的派生摘要 |
+| 新增 | [compact.py](../lessons/stages/10/minicode/compact.py) | 生成模型请求的派生摘要 |
 | 新增 | [本章实验](../examples/10_sessions.py)、[会话测试](../tests/test_session.py)、[压缩测试](../tests/test_compact.py) | 独立验证恢复与摘要失败回退 |
 
 这些链接是本章完整文件，正文下面先给出对已有模块的完整增量。Agent 只接收消息列表，仍然不打开会话文件；三个协议适配器完全不变。其余较短片段用于解释组合方式，可直接运行的组装见本章实验。

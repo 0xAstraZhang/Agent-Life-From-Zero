@@ -60,7 +60,7 @@ def test_invalid_chat_field_is_rejected_before_http():
 
 
 def test_factory_does_not_import_future_protocols(tmp_path):
-    for name in ("__init__.py", "types.py", "providers/__init__.py", "providers/base.py", "providers/chat.py"):
+    for name in ("__init__.py", "types.py", "providers/__init__.py", "providers/base.py", "providers/controls.py", "providers/chat.py"):
         destination = tmp_path / "minicode" / name
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(ROOT / "minicode" / name, destination)

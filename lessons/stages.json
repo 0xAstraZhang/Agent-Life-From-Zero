@@ -80,7 +80,7 @@
       "title": "编码工具",
       "files": {
         "examples/06_coding_tools.py": "examples/06_coding_tools.py",
-        "minicode/coding_tools.py": "minicode/coding_tools.py",
+        "minicode/coding_tools.py": "lessons/stages/06/minicode/coding_tools.py",
         "tests/test_coding_tools.py": "tests/test_coding_tools.py"
       },
       "example": "examples/06_coding_tools.py"
@@ -104,10 +104,10 @@
         "minicode/agent.py": "lessons/stages/08/minicode/agent.py",
         "minicode/model.py": "minicode/model.py",
         "minicode/testing.py": "minicode/testing.py",
-        "minicode/providers/base.py": "minicode/providers/base.py",
-        "minicode/providers/chat.py": "minicode/providers/chat.py",
-        "minicode/providers/responses.py": "minicode/providers/responses.py",
-        "minicode/providers/anthropic.py": "minicode/providers/anthropic.py",
+        "minicode/providers/base.py": "lessons/stages/08/minicode/providers/base.py",
+        "minicode/providers/chat.py": "lessons/stages/08/minicode/providers/chat.py",
+        "minicode/providers/responses.py": "lessons/stages/08/minicode/providers/responses.py",
+        "minicode/providers/anthropic.py": "lessons/stages/08/minicode/providers/anthropic.py",
         "minicode/providers/demo.py": "minicode/providers/demo.py",
         "minicode/providers/__init__.py": "minicode/providers/__init__.py",
         "tests/test_streaming.py": "tests/test_streaming.py",
@@ -130,10 +130,10 @@
       "title": "会话与压缩",
       "files": {
         "examples/10_sessions.py": "examples/10_sessions.py",
-        "minicode/types.py": "minicode/types.py",
-        "minicode/agent.py": "minicode/agent.py",
+        "minicode/types.py": "lessons/stages/10/minicode/types.py",
+        "minicode/agent.py": "lessons/stages/10/minicode/agent.py",
         "minicode/session.py": "minicode/session.py",
-        "minicode/compact.py": "minicode/compact.py",
+        "minicode/compact.py": "lessons/stages/10/minicode/compact.py",
         "tests/test_session.py": "tests/test_session.py",
         "tests/test_compact.py": "tests/test_compact.py",
         "tests/test_core.py": "tests/test_core.py"
@@ -157,7 +157,7 @@
       "title": "子 Agent",
       "files": {
         "examples/12_subagents.py": "examples/12_subagents.py",
-        "minicode/subagents.py": "minicode/subagents.py",
+        "minicode/subagents.py": "lessons/stages/12/minicode/subagents.py",
         "tests/test_subagents.py": "tests/test_subagents.py"
       },
       "example": "examples/12_subagents.py"
@@ -188,7 +188,7 @@
       "title": "评测与预算",
       "files": {
         "examples/15_evals.py": "examples/15_evals.py",
-        "minicode/budget.py": "minicode/budget.py",
+        "minicode/budget.py": "lessons/stages/15/minicode/budget.py",
         "tests/test_budget.py": "tests/test_budget.py",
         "minicode/evals.py": "minicode/evals.py",
         "tests/test_evals.py": "tests/test_evals.py"
@@ -203,7 +203,7 @@
         "minicode/cli.py": "lessons/stages/16/minicode/cli.py",
         "minicode/__main__.py": "minicode/__main__.py",
         "tests/test_app.py": "tests/test_app.py",
-        "tests/test_provider_config.py": "tests/test_provider_config.py"
+        "tests/test_provider_config.py": "lessons/stages/16/tests/test_provider_config.py"
       },
       "example": "examples/16_shipping.py"
     },
@@ -212,11 +212,58 @@
       "title": "沙箱",
       "files": {
         "examples/17_sandbox.py": "examples/17_sandbox.py",
-        "minicode/sandbox.py": "minicode/sandbox.py",
-        "minicode/cli.py": "minicode/cli.py",
+        "minicode/sandbox.py": "lessons/stages/17/minicode/sandbox.py",
+        "minicode/cli.py": "lessons/stages/17/minicode/cli.py",
         "tests/test_sandbox.py": "tests/test_sandbox.py"
       },
       "example": "examples/17_sandbox.py"
+    },
+    {
+      "chapter": 18,
+      "title": "运行控制与可观测性",
+      "files": {
+        "examples/18_runtime.py": "examples/18_runtime.py",
+        "minicode/__init__.py": "minicode/__init__.py",
+        "minicode/__main__.py": "minicode/__main__.py",
+        "minicode/agent.py": "minicode/agent.py",
+        "minicode/budget.py": "minicode/budget.py",
+        "minicode/cli.py": "minicode/cli.py",
+        "minicode/coding_tools.py": "minicode/coding_tools.py",
+        "minicode/compact.py": "minicode/compact.py",
+        "minicode/context.py": "minicode/context.py",
+        "minicode/evals.py": "minicode/evals.py",
+        "minicode/hooks.py": "minicode/hooks.py",
+        "minicode/mcp.py": "minicode/mcp.py",
+        "minicode/model.py": "minicode/model.py",
+        "minicode/observability.py": "minicode/observability.py",
+        "minicode/permissions.py": "minicode/permissions.py",
+        "minicode/planning.py": "minicode/planning.py",
+        "minicode/processes.py": "minicode/processes.py",
+        "minicode/providers/__init__.py": "minicode/providers/__init__.py",
+        "minicode/providers/anthropic.py": "minicode/providers/anthropic.py",
+        "minicode/providers/base.py": "minicode/providers/base.py",
+        "minicode/providers/chat.py": "minicode/providers/chat.py",
+        "minicode/providers/controls.py": "minicode/providers/controls.py",
+        "minicode/providers/demo.py": "minicode/providers/demo.py",
+        "minicode/providers/responses.py": "minicode/providers/responses.py",
+        "minicode/sandbox.py": "minicode/sandbox.py",
+        "minicode/session.py": "minicode/session.py",
+        "minicode/skills.py": "minicode/skills.py",
+        "minicode/subagents.py": "minicode/subagents.py",
+        "minicode/testing.py": "minicode/testing.py",
+        "minicode/tool.py": "minicode/tool.py",
+        "minicode/types.py": "minicode/types.py",
+        "tests/test_context_window.py": "tests/test_context_window.py",
+        "tests/test_evaluation_cli.py": "tests/test_evaluation_cli.py",
+        "tests/test_file_ranges.py": "tests/test_file_ranges.py",
+        "tests/test_model_controls.py": "tests/test_model_controls.py",
+        "tests/test_observability.py": "tests/test_observability.py",
+        "tests/test_provider_config.py": "tests/test_provider_config.py",
+        "tests/test_request_reliability.py": "tests/test_request_reliability.py",
+        "tests/test_runtime_controls.py": "tests/test_runtime_controls.py",
+        "tests/test_tool_sessions.py": "tests/test_tool_sessions.py"
+      },
+      "example": "examples/18_runtime.py"
     }
   ]
 }

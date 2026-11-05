@@ -128,9 +128,10 @@ def sandbox_tools(tools: list[Tool], sandbox: Sandbox) -> list[Tool]:
 
     result = []
     for tool in tools:
-        if tool.spec.name == "Bash":
+        if tool.spec.name in {"Bash", "BashStart"}:
             # 原说明写着“cwd 不是沙箱”，这里整体替换，避免给模型自相矛盾的规则。
-            spec = replace(tool.spec, description="执行 shell 命令，需要权限确认。" + sandbox.describe())
+            operation = "启动后台 shell 进程（管道输入，无 TTY）" if tool.spec.name == "BashStart" else "执行 shell 命令"
+            spec = replace(tool.spec, description=operation + "，需要权限确认。" + sandbox.describe())
             tool = replace(tool, spec=spec, execute=bash(tool.execute))
         elif tool.spec.name in {"Write", "Edit"}:
             tool = replace(tool, execute=guarded(tool.execute))

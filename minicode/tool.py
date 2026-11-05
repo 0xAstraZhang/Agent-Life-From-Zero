@@ -2,6 +2,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+import time
 
 from jsonschema import Draft202012Validator, ValidationError
 
@@ -11,6 +12,19 @@ from .types import ToolCall, ToolResult, ToolSpec
 @dataclass
 class ToolContext:
     cwd: Path
+    deadline: float | None = None
+
+    def remaining(self, timeout: float) -> float:
+        """Clamp a blocking operation to the task's monotonic deadline."""
+        if self.deadline is None:
+            return timeout
+        remaining = self.deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("任务已达到截止时间")
+        return min(timeout, remaining)
+
+    def check_deadline(self) -> None:
+        self.remaining(float("inf"))
 
 
 @dataclass
@@ -34,6 +48,7 @@ class ToolRunner:
         return [tool.spec for tool in self.tools.values()]
 
     def run(self, call: ToolCall) -> ToolResult:
+        self.context.check_deadline()
         tool = self.tools.get(call.name)
         if tool is None:
             return ToolResult(call.id, f"未知工具：{call.name}", True)

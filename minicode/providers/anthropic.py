@@ -3,7 +3,7 @@ import copy
 import json
 
 from ..types import Message, ModelReply, StreamEvent, Text, ToolCall, ToolResult, Usage, message_text
-from .base import HTTPModel, ProtocolError, parse_call
+from .base import HTTPModel, ProtocolError
 
 
 class AnthropicModel(HTTPModel):
@@ -46,7 +46,8 @@ class AnthropicModel(HTTPModel):
             body["system"] = "\n\n".join(system)
         if tools:
             body["tools"] = [{"name": t.name, "description": t.description,
-                              "input_schema": t.parameters} for t in tools]
+                              "input_schema": self.tool_schema(t.parameters), **({"strict": True} if self.config.strict_tools else {})} for t in tools]
+        body.update(self.controls(tools, messages))
         return body
 
     def decode(self, response):
@@ -58,7 +59,7 @@ class AnthropicModel(HTTPModel):
             if kind == "text":
                 content.append(Text(block["text"]))
             elif kind == "tool_use":
-                content.append(parse_call(block.get("id"), block.get("name"), block.get("input")))
+                content.append(self.parse_call(block.get("id"), block.get("name"), block.get("input")))
             elif kind not in ("thinking", "redacted_thinking"):
                 raise ProtocolError(f"不支持的 Anthropic 内容块：{kind}")
         reason = {"end_turn": "stop", "stop_sequence": "stop", "tool_use": "tool_calls",
@@ -66,10 +67,10 @@ class AnthropicModel(HTTPModel):
         u = response.get("usage") or {}
         input_tokens = sum(u.get(k, 0) for k in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"))
         message = self.remember(Message("assistant", content), response.get("content", []))
-        return ModelReply(message, Usage(input_tokens, u.get("output_tokens", 0)), reason,
-                          "不支持的 stop_reason" if reason == "error" else "")
+        return self.finish(ModelReply(message, Usage(input_tokens, u.get("output_tokens", 0)), reason,
+                          "不支持的 stop_reason" if reason == "error" else ""), response)
 
-    def stream(self, messages, tools=None):
+    def _stream(self, messages, tools=None):
         response = None
         blocks = {}
         inputs = {}

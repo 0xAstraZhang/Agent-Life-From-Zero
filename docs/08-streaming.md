@@ -25,13 +25,13 @@ uv sync
 | [types.py](../lessons/stages/08/minicode/types.py) | 在已有类型后增加 `StreamEvent`，仍没有第 10 章序列化函数 |
 | [model.py](../minicode/model.py) | 模型协议增加 `stream()` |
 | [testing.py](../minicode/testing.py) | FakeModel 可以逐字产出文本，再发送完成事件 |
-| [providers/base.py](../minicode/providers/base.py) | SSE 分帧与 HTTP 流生命周期 |
-| [chat.py](../minicode/providers/chat.py)、[responses.py](../minicode/providers/responses.py)、[anthropic.py](../minicode/providers/anthropic.py) | 各自协议的流状态机 |
+| [providers/base.py](../lessons/stages/08/minicode/providers/base.py) | SSE 分帧与 HTTP 流生命周期 |
+| [chat.py](../lessons/stages/08/minicode/providers/chat.py)、[responses.py](../lessons/stages/08/minicode/providers/responses.py)、[anthropic.py](../lessons/stages/08/minicode/providers/anthropic.py) | 各自协议的流状态机 |
 | [providers/demo.py](../minicode/providers/demo.py) | 加入三个协议的 SSE 测试数据 |
 | [agent.py](../lessons/stages/08/minicode/agent.py) | 增加流式请求、中断补记；仍没有第 10 章 `history` 参数 |
 | [本章实验](../examples/08_streaming.py)、[本章测试](../tests/test_streaming.py) | 逐协议运行流式工具往返，验证断流不执行 |
 
-表中根目录下的模型和适配器文件到本章已完整实现，以后不再为会话或技能加入依赖。Agent 和 types 仍使用本章阶段版本。下面标为“完整替换”的代码可以直接写入对应位置，其余协议事件示例用于解释状态机。
+表中链接与本章导出文件一致。模型和适配器到本章已经支持流式处理；第 18 章才继续增加控制参数和请求记录。Agent 和 types 也使用本章阶段版本。下面标为“完整替换”的代码可以直接写入对应位置，其余协议事件示例用于解释状态机。
 
 前面章节只调用 `complete()`。在这里才增加 `stream=True` 分支，权限和工具执行仍使用已有包装器。
 
