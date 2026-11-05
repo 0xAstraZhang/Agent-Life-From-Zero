@@ -43,7 +43,10 @@ def _is_context_error(error):
         return False
     description = str(error).lower()
     if response is not None:
-        description += " " + response.text.lower()
+        try:
+            description += " " + response.text.lower()
+        except Exception:  # 未读取的流式响应体；适配器应在抛出前读取错误详情
+            pass
     return any(marker in description for marker in (
         "context_length_exceeded", "maximum context length", "context window",
         "prompt is too long", "too many tokens", "context length"))
@@ -86,7 +89,8 @@ class CompactingModel:
         self.threshold_chars, self.keep_turns = threshold_chars, keep_turns
         self.context_window, self.reserve_output_tokens = context_window, reserve_output_tokens
         self.compactions, self.last_error = 0, ""
-        self._key, self._summary = "", ""
+        # 摘要覆盖的前缀（指纹与条数）和上次的切分点：视图仍够小时复用，前缀增长时只追加摘要。
+        self._key, self._summary, self._covered, self._boundary = "", "", 0, None
         self.deadline = getattr(inner, "deadline", None)
 
     def set_deadline(self, deadline):
@@ -131,8 +135,8 @@ class CompactingModel:
             offset += low
         return chunks or [""]
 
-    def _summarize(self, prefix):
-        summary, usage = "", Usage()
+    def _summarize(self, prefix, seed=""):
+        summary, usage = seed, Usage()
         for chunk in self._summary_chunks(render_transcript(prefix)):
             prompt = ("此前已归纳的摘要：\n" + summary + "\n\n后续记录：\n" if summary else "") + chunk
             request = [Message.text("system", "为后续工作写交接摘要。保留用户目标、约束、已验证结果、"
@@ -155,12 +159,52 @@ class CompactingModel:
                 raise error
         return summary, usage
 
+    @staticmethod
+    def _size(messages):
+        return len(json.dumps([message_to_dict(message) for message in messages], ensure_ascii=False))
+
+    @staticmethod
+    def _fingerprint(messages):
+        return hashlib.sha256(json.dumps([message_to_dict(message) for message in messages],
+                                         sort_keys=True).encode()).hexdigest()
+
+    @staticmethod
+    def _split(original, boundary):
+        """切分点之前：system 原样保留，最近的用户目标单独保留，其余进入摘要。"""
+        starts = [i for i, message in enumerate(original) if message.role == "user"]
+        latest_goal = starts[-1] if starts else None
+        preserved_goal = [original[latest_goal]] if latest_goal is not None and latest_goal < boundary else []
+        prefix = [message for index, message in enumerate(original[:boundary])
+                  if message.role != "system" and index != latest_goal]
+        systems = [message for message in original[:boundary] if message.role == "system"]
+        return prefix, systems, preserved_goal
+
+    def _view(self, original, boundary):
+        _, systems, preserved_goal = self._split(original, boundary)
+        summary_message = Message.text("user", "以下是此前会话的交接摘要，作为任务背景参考：\n" + self._summary)
+        return systems + [summary_message] + preserved_goal + original[boundary:]
+
+    def _cached_view(self, original, tools):
+        """完整历史超过阈值后仍一直超过；只要上次的视图还放得下，就不移动切分点、不重新摘要。"""
+        if self._boundary is None or self._boundary > len(original):
+            return None
+        prefix, _, _ = self._split(original, self._boundary)
+        if not prefix or len(prefix) != self._covered or self._fingerprint(prefix) != self._key:
+            return None
+        view = self._view(original, self._boundary)
+        if self._size(view) >= self.threshold_chars or self._over_window(view, tools):
+            return None
+        return view
+
     def _prepare(self, messages, tools=(), *, force=False):
         original = deepcopy(messages)
-        size = len(json.dumps([message_to_dict(message) for message in original], ensure_ascii=False))
         over_window = self._over_window(original, tools)
-        if not force and size < self.threshold_chars and not over_window:
+        if not force and self._size(original) < self.threshold_chars and not over_window:
             return original, Usage()
+        if not force:
+            cached = self._cached_view(original, tools)
+            if cached is not None:
+                return cached, Usage()
         boundary = self._choose_boundary(original, force)
         if boundary is None and over_window and not force:
             boundary = self._choose_boundary(original, force=True)
@@ -169,21 +213,21 @@ class CompactingModel:
             if over_window:
                 raise ContextWindowExceeded("没有可压缩的完整工具往返；请分段读取或增大上下文窗口")
             return original, Usage()
-        starts = [i for i, message in enumerate(original) if message.role == "user"]
-        latest_goal = starts[-1] if starts else None
-        preserved_goal = [original[latest_goal]] if latest_goal is not None and latest_goal < boundary else []
-        prefix = [message for index, message in enumerate(original[:boundary])
-                  if message.role != "system" and index != latest_goal]
+        prefix, _, _ = self._split(original, boundary)
         if not prefix:
             return original, Usage()
-        key = hashlib.sha256(json.dumps([message_to_dict(message) for message in prefix],
-                                       sort_keys=True).encode()).hexdigest()
+        key = self._fingerprint(prefix)
         usage, started = Usage(), time.monotonic()
         if key != self._key:
+            # 前缀以已摘要部分开头时，只把新移出视图的记录接到旧摘要后面。
+            seed, covered = "", 0
+            if (self._summary and 0 < self._covered < len(prefix)
+                    and self._fingerprint(prefix[:self._covered]) == self._key):
+                seed, covered = self._summary, self._covered
             self._observe({"type": "compaction_start", "estimated_input_tokens": estimate_tokens(original, tools),
-                           "estimator": "utf8_bytes_div_3", "forced": force})
+                           "estimator": "utf8_bytes_div_3", "forced": force, "incremental": bool(seed)})
             try:
-                summary, usage = self._summarize(prefix)
+                summary, usage = self._summarize(prefix[covered:], seed)
             except Exception as error:
                 self.last_error = str(error)
                 usage = getattr(error, "summary_usage", usage)
@@ -192,12 +236,11 @@ class CompactingModel:
                 if over_window or force or isinstance(error, TimeoutError):
                     raise
                 return original, usage
-            self._key, self._summary = key, summary
+            self._key, self._summary, self._covered = key, summary, len(prefix)
             self.compactions += 1
             self.last_error = ""
-        systems = [message for message in original[:boundary] if message.role == "system"]
-        summary_message = Message.text("user", "以下是此前会话的交接摘要，作为任务背景参考：\n" + self._summary)
-        prepared = systems + [summary_message] + preserved_goal + original[boundary:]
+        self._boundary = boundary
+        prepared = self._view(original, boundary)
         if self._over_window(prepared, tools) and not force:
             aggressive, extra = self._prepare(original, tools, force=True)
             extra.input_tokens += usage.input_tokens

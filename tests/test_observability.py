@@ -1,6 +1,7 @@
 import json
 from dataclasses import asdict
 
+import httpx
 import pytest
 
 from minicode.observability import Prices, RunRecorder, safe_config
@@ -77,3 +78,37 @@ def test_config_snapshot_omits_key_and_url_credentials():
     serialized = json.dumps(safe_config(config))
     assert "secret" not in serialized and "api_key" not in serialized
     assert safe_config(config)["base_url"] == "https://host.invalid/v1"
+
+
+@pytest.mark.parametrize("failure,unknown", [
+    (lambda request: httpx.Response(429, json={"error": "rate limited"}), 0),
+    (lambda request: httpx.Response(408, json={"error": "request timeout"}), 0),
+    (lambda request: (_ for _ in ()).throw(httpx.ConnectError("refused", request=request)), 0),
+    # 请求可能已到达服务商并产生费用：保持未知。
+    (lambda request: httpx.Response(503, json={"error": "overloaded"}), 1),
+    (lambda request: (_ for _ in ()).throw(httpx.ReadTimeout("slow", request=request)), 1),
+])
+def test_only_certainly_unbilled_failures_count_as_zero_usage(failure, unknown):
+    from minicode.providers import create_model
+    from minicode.providers.demo import payload
+    from minicode.types import Message
+    attempts = []
+
+    def handler(request):
+        attempts.append(request)
+        if len(attempts) == 1:
+            return failure(request)
+        return httpx.Response(200, json=payload("openai-chat", False))
+
+    recorder = RunRecorder(prices=prices())
+    config = ModelConfig("openai-chat", "fixture", "https://fixture.invalid/v1", "key",
+                         retry_base_delay=0, retry_max_delay=0)
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        adapter = create_model(config, client)
+        adapter.observer = recorder.record
+        adapter.complete([Message.text("user", "hi")])
+    summary = recorder.summary()
+    assert summary["requests"] == 2 and summary["retries"] == 1
+    assert summary["unknown_usage_requests"] == unknown
+    assert (summary["estimated_cost"] is None) == bool(unknown)
+    assert summary["known_cost_subtotal"] == pytest.approx((10 * 2 + 5 * 8) / 1_000_000)

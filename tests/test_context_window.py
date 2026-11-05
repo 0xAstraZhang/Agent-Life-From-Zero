@@ -156,3 +156,74 @@ def test_compaction_error_trace_excludes_exception_payload():
     serialized = json.dumps(observed)
     assert "secret" not in serialized and "private-prompt" not in serialized and "example.invalid" not in serialized
     assert any(event.get("error_type") == "RuntimeError" for event in observed)
+
+
+def test_long_single_task_extends_summary_instead_of_resummarizing_every_turn():
+    class Backend:
+        def __init__(self):
+            self.summaries = []
+
+        def summary_complete(self, messages):
+            self.summaries.append(message_text(messages[-1]))
+            return ModelReply(Message.text("assistant", f"summary {len(self.summaries)}"), Usage(1, 1), "stop")
+
+        def complete(self, messages, tools=()):
+            return ModelReply(Message.text("assistant", "ok"), Usage(), "stop")
+
+    backend = Backend()
+    wrapper = CompactingModel(backend, threshold_chars=3000, keep_turns=2)
+    history = long_task(rounds=3, width=300)
+    turns = 30
+    for index in range(3, turns):
+        wrapper.complete(history)
+        request = call("Read", path=f"{index}.py")
+        history += [Message("assistant", [request]), Message("tool", [ToolResult(request.id, "y" * 300)])]
+    # 视图放得下时复用上次切分点；需要再压缩时只把新移出的记录接到旧摘要后。
+    assert 1 < len(backend.summaries) < turns // 3
+    assert all(text.startswith("此前已归纳的摘要") for text in backend.summaries[1:])
+    assert all('"0.py"' not in text for text in backend.summaries[1:])
+
+
+def test_edited_prefix_invalidates_incremental_summary():
+    backend = FakeModel(["first summary", "answer", "fresh summary", "answer"])
+    wrapper = CompactingModel(backend, threshold_chars=100, keep_turns=1)
+    history = long_task()
+    wrapper.complete(history)
+    history[2] = Message("assistant", [call("Read", path="edited.py")])
+    history[3] = Message("tool", [ToolResult(tool_calls(history[2])[0].id, "edited")])
+    wrapper.complete(history)
+    summary_request = message_text(backend.requests[2]["messages"][-1])
+    assert "edited.py" in summary_request and "此前已归纳的摘要" not in summary_request
+
+
+def test_stream_overflow_with_unread_error_body_still_recovers():
+    import json
+    import httpx
+    from minicode.providers import ModelConfig, create_model
+
+    class Unread(httpx.SyncByteStream):
+        """真实网络上的流式错误响应体不会被预读（MockTransport 的 json= 会预读）。"""
+        def __init__(self, data):
+            self.data = data
+
+        def __iter__(self):
+            yield self.data
+
+    sent = []
+    def handler(request):
+        body = json.loads(request.content)
+        sent.append(body)
+        if len(sent) == 1:
+            error = json.dumps({"error": {"code": "context_length_exceeded"}}).encode()
+            return httpx.Response(400, stream=Unread(error), headers={"content-type": "application/json"})
+        if body.get("stream"):
+            data = b'data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'
+            return httpx.Response(200, stream=Unread(data), headers={"content-type": "text/event-stream"})
+        return httpx.Response(200, json={"choices": [{"message": {"role": "assistant", "content": "summary"},
+                                                      "finish_reason": "stop"}]})
+
+    config = ModelConfig("openai-chat", "m", "https://fixture.invalid/v1", "k", max_retries=0)
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        events = list(CompactingModel(create_model(config, client), threshold_chars=10**9).stream(long_task()))
+    assert message_text(events[-1].reply.message) == "ok"
+    assert len(sent) == 3 and not sent[1].get("stream")

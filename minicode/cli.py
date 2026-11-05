@@ -210,7 +210,10 @@ def run(args, stack):
         def child_runner(context):
             return PermissionRunner(ToolRunner(build_coding_tools(include_bash=False), ToolContext(cwd)),
                                     approval=approval, read_only=True)
-        tools.append(subagent_tool(lambda: model, child_runner, max_turns=6, observer=recorder.record))
+        # 子 Agent 的工具集合和散文摘要不同于父任务：不继承 tool_choice 与最终输出格式，但共享预算。
+        delegate = getattr(base_model, "delegate_model", None)
+        child_model = BudgetModel(delegate(), budget) if delegate else model
+        tools.append(subagent_tool(lambda: child_model, child_runner, max_turns=6, observer=recorder.record))
     runner = PermissionRunner(ToolRunner(tools, ToolContext(cwd)), approval=approval,
                               read_only=args.read_only, allowed=tuple(args.allow_tool))
     system = "你是 minicode。先检查文件，再修改，最后验证结果。工具失败时根据错误修正；不要声称完成尚未验证的工作。"

@@ -59,11 +59,13 @@ export MINICODE_REASONING_EFFORT=high
 | `--thinking` | `enabled` 或 `disabled`；也可通过 `MINICODE_THINKING` 设置 |
 | `--reasoning-effort` | DeepSeek 显式使用 `low/high/max`；环境变量是 `MINICODE_REASONING_EFFORT` |
 | `--thinking-budget-tokens` | 仅用于原生 Anthropic 显式思考预算，不能当作 DeepSeek 的 effort |
-| `--tool-choice` | `auto`、`none`、`required` 或 `tool:工具名`，具体支持范围按服务商检查 |
+| `--tool-choice` | `auto`、`none`、`required` 或 `tool:工具名`，具体支持范围按服务商检查；强制选择只作用到本次用户输入后的第一次工具调用 |
 | `--response-format json_object` | 请求 JSON 对象；DeepSeek 当前只开放已确认的 Chat 协议组合 |
 | `--response-format json_schema --response-schema FILE` | 加载 JSON Schema，只有支持该格式的服务商和协议才接受 |
 
 最终结构化回复还会在本地解析或验证 schema，格式错误不会被当作成功。工具调用中间轮次仍按工具协议处理。
+
+`required` 和 `tool:工具名` 若在每一轮都生效，模型永远无法给出最终回答，任务只能耗尽轮数。因此强制选择只用于本次用户输入后、第一次工具调用之前的请求；工具结果返回后不再发送 `tool_choice`，交回服务商默认。`auto` 和 `none` 每轮都发送。子 Agent 沿用路由、思考和采样设置，但不继承父任务的工具选择和最终输出格式：它的工具集合不同，返回的是散文摘要。
 
 DeepSeek 的思考模式默认值、effort 档位和采样参数效果由服务端决定。做评测时显式填写需要固定的参数，保存本次有效配置；不要把服务端忽略的参数当作已经控制的变量。参考 [Thinking Mode](https://api-docs.deepseek.com/guides/thinking_mode/) 和 [Anthropic API 兼容说明](https://api-docs.deepseek.com/guides/anthropic_api/)。
 
@@ -87,6 +89,8 @@ token 预算仍是在下一次请求之前检查的软上限，当前请求可�
 ## 单个长任务的上下文
 
 长任务中只有一次用户输入，也可能产生许多轮模型和工具消息。本章按完整工具往返寻找可压缩边界，保留用户目标、system 消息和最近的上下文，不拆开工具调用与对应结果。
+
+完整历史一旦超过阈值就会一直超过，所以不能每轮都按完整历史重新摘要。压缩后的请求视图仍低于阈值时，沿用上次的切分点和摘要；视图再次超限才移动切分点，并且只把新移出视图的记录与旧摘要一起交给模型续写。历史被修改、前缀对不上时才从头摘要。
 
 `--compact-chars` 保留旧的字符阈值入口；`--context-window` 指定模型上下文窗口，压缩时给 `--max-output-tokens` 预留空间。本地 token 数是估算值，用于提前收缩请求，不能替代服务商返回的实际 usage。
 
@@ -132,6 +136,8 @@ uv run minicode --allow-tool Bash --allow-tool BashStart \
 | `cache_write_per_million` | 创建缓存每百万 token 的价格 |
 
 缓存分项与普通输入互斥，推理 token 已包含在输出中时不会再次收费。服务商缺少用量时，`estimated_cost` 为 `null`，另保留已知费用小计和未知用量的请求数。价格有时段差异时应按对应时段分别运行或复算。
+
+可以确定没有生成的失败请求按零用量计入，并在请求记录中标记 `unbilled: true`：连接未建立，或服务商以 4xx（包括 429）拒绝。读超时、5xx 和中途断开的流可能已经计费，仍记为未知。
 
 事件日志必须使用新文件路径，避免覆盖上一次结果。它记录控制和计量元数据，不包含提示词、工具参数和工具输出；`--session` 和 `--json` 中的对话内容另按实际需求保存。
 

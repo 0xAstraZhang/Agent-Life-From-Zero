@@ -198,3 +198,76 @@ def test_tool_choice_none_cannot_execute_a_noncompliant_provider_tool_call():
         adapter = create_model(config(tool_choice="none"), client)
         reply = adapter.decode(payload("openai-chat", True))
         assert reply.stop_reason == "error" and "tool_choice" in reply.error
+
+
+@pytest.mark.parametrize("choice", ["required", "tool:solve"])
+def test_forced_tool_choice_applies_only_until_first_tool_call_of_each_input(choice):
+    from minicode.types import ToolCall, ToolResult
+    c = config("openai-chat", "openai", "gpt-5.4", tool_choice=choice)
+    asked = [Message.text("user", "go")]
+    called = asked + [Message("assistant", [ToolCall("c1", "solve", {"answer": 1})]),
+                      Message("tool", [ToolResult("c1", "ok")])]
+    again = called + [Message("assistant", [Message.text("assistant", "done").content[0]]), Message.text("user", "next")]
+    with httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200))) as client:
+        adapter = create_model(c, client)
+        assert "tool_choice" in adapter.encode(asked, [TOOL])
+        assert "tool_choice" not in adapter.encode(called, [TOOL])
+        # After the reset, a final answer is not a policy violation.
+        assert adapter.decode(payload("openai-chat", False)).stop_reason == "stop"
+        assert "tool_choice" in adapter.encode(again, [TOOL])
+        assert adapter.decode(payload("openai-chat", False)).stop_reason == "error"
+    with httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200))) as client:
+        assert encode(config("openai-chat", "openai", "gpt-5.4", tool_choice="none"), [TOOL])["tool_choice"] == "none"
+        body = create_model(config("openai-chat", "openai", "gpt-5.4", tool_choice="none"), client).encode(called, [TOOL])
+        assert body["tool_choice"] == "none"
+
+
+def test_delegate_model_drops_parent_task_controls_only():
+    c = config("openai-chat", "openai", "gpt-5.4", reasoning_effort="high", strict_tools=True,
+               tool_choice="tool:solve", response_format="json_schema", response_schema=SCHEMA)
+    with httpx.Client() as client:
+        child = create_model(c, client).delegate_model()
+    assert child.config.tool_choice is None and child.config.response_format is None
+    assert child.config.response_schema is None
+    assert child.config.reasoning_effort == "high" and child.config.strict_tools
+
+
+def test_openai_strict_response_schema_is_rejected_at_configuration():
+    loose = {"type": "object", "properties": {"answer": {"type": "integer"}}}
+    with pytest.raises(ValueError, match="strict schema"):
+        config("openai-chat", "openai", "gpt-5.4", response_format="json_schema", response_schema=loose)
+
+
+OPTS = {"type": "object", "additionalProperties": False, "required": ["a"],
+        "properties": {"a": {"type": "string"}, "b": {"type": "integer"}}}
+
+
+@pytest.mark.parametrize("schema,arguments,expected", [
+    ({"type": "object", "additionalProperties": False, "required": ["opts"], "$defs": {"Opts": OPTS},
+      "properties": {"opts": {"$ref": "#/$defs/Opts"}}},
+     {"opts": {"a": "x", "b": None}}, {"opts": {"a": "x"}}),
+    ({"type": "object", "additionalProperties": False, "required": ["items"], "definitions": {"Opts": OPTS},
+      "properties": {"items": {"type": "array", "items": {"$ref": "#/definitions/Opts"}}}},
+     {"items": [{"a": "x", "b": None}, {"a": "y", "b": 2}]}, {"items": [{"a": "x"}, {"a": "y", "b": 2}]}),
+    ({"type": "object", "additionalProperties": False, "required": ["v"],
+      "properties": {"v": {"anyOf": [{"type": "string"}, OPTS]}}},
+     {"v": {"a": "x", "b": None}}, {"v": {"a": "x"}}),
+    ({"type": "object", "additionalProperties": False, "required": ["v"],
+      "properties": {"v": {"allOf": [OPTS]}}},
+     {"v": {"a": "x", "b": None}}, {"v": {"a": "x"}}),
+    ({"$defs": {"Node": {"type": "object", "additionalProperties": False, "required": ["name"],
+                         "properties": {"name": {"type": "string"}, "child": {"$ref": "#/$defs/Node"}}}},
+      "$ref": "#/$defs/Node"},
+     {"name": "root", "child": {"name": "leaf", "child": None}}, {"name": "root", "child": {"name": "leaf"}}),
+    # Genuinely nullable fields behind a reference keep their null.
+    ({"type": "object", "additionalProperties": False, "required": [],
+      "$defs": {"Maybe": {"type": ["integer", "null"]}}, "properties": {"m": {"$ref": "#/$defs/Maybe"}}},
+     {"m": None}, {"m": None}),
+])
+def test_strict_restoration_follows_references_and_combinators(schema, arguments, expected):
+    from jsonschema import Draft202012Validator
+    from minicode.providers.controls import restore_optional_arguments, strict_tool_schema
+    assert Draft202012Validator(strict_tool_schema(schema)).is_valid(arguments)
+    restored = restore_optional_arguments(arguments, schema)
+    assert restored == expected
+    assert Draft202012Validator(schema).is_valid(restored)

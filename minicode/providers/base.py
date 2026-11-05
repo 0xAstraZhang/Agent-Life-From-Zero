@@ -18,7 +18,7 @@ import httpx
 from jsonschema import Draft202012Validator, ValidationError
 
 from ..types import Message, ModelReply, StreamEvent, ToolCall, ToolSpec, message_text, tool_calls
-from .controls import request_controls, strict_schema, strict_tool_schema, restore_optional_arguments, validate_controls
+from .controls import request_controls, strict_tool_schema, restore_optional_arguments, validate_controls
 
 
 @dataclass(frozen=True)
@@ -165,11 +165,24 @@ class HTTPModel:
     def decode(self, response: dict) -> ModelReply:
         raise NotImplementedError
 
-    def controls(self, tools):
+    def tool_choice_for(self, messages):
+        """强制选择（required / tool:名）只作用到本次用户输入后的第一次工具调用。
+
+        之后每轮仍强制会让模型无法给出最终回答，只能耗尽轮数；此后不发送 tool_choice，交回服务商默认。
+        """
+        choice = self.config.tool_choice
+        if choice == "required" or (choice or "").startswith("tool:"):
+            for message in reversed(messages):
+                if message.role == "user":
+                    break
+                if message.role == "assistant" and tool_calls(message):
+                    return None
+        return choice
+
+    def controls(self, tools, messages=()):
         self._local.tool_schemas = {tool.name: tool.parameters for tool in tools}
-        if self.config.response_format == "json_schema" and self.config.provider.lower() == "openai":
-            strict_schema(self.config.response_schema)
-        return request_controls(self.config, tools)
+        self._local.tool_choice = self.tool_choice_for(messages)
+        return request_controls(self.config, tools, tool_choice=self._local.tool_choice)
 
     def tool_schema(self, schema):
         return strict_tool_schema(schema) if self.config.strict_tools else schema
@@ -181,12 +194,19 @@ class HTTPModel:
             call.arguments = restore_optional_arguments(call.arguments, schema)
         return call
 
-    def summary_complete(self, messages):
-        config = replace(self.config, tool_choice=None, strict_tools=False,
-                         response_format=None, response_schema=None)
-        model = type(self)(config, self.client, observer=self.observer)
+    def _derived(self, **changes):
+        # 共享连接、观察者和期限；只替换本次用途不该继承的控制参数。
+        model = type(self)(replace(self.config, **changes), self.client, observer=self.observer)
         model.set_deadline(self.deadline)
-        return model.complete(messages, [])
+        return model
+
+    def summary_complete(self, messages):
+        return self._derived(tool_choice=None, strict_tools=False,
+                             response_format=None, response_schema=None).complete(messages, [])
+
+    def delegate_model(self):
+        """子 Agent 沿用路由与生成参数；工具选择和最终输出格式只属于父任务。"""
+        return self._derived(tool_choice=None, response_format=None, response_schema=None)
 
     @property
     def effective_config(self):
@@ -250,7 +270,8 @@ class HTTPModel:
         reply.metadata = {key: response[key] for key in ("id", "model") if key in response}
         # Validate requested tool policy before any call can reach an executor.
         calls = tool_calls(reply.message)
-        choice = self.config.tool_choice
+        # 按本次请求实际发送的选择验收；直接 decode 时退回配置值。
+        choice = getattr(self._local, "tool_choice", self.config.tool_choice)
         if reply.stop_reason in ("stop", "tool_calls") and choice is not None:
             invalid = ((choice == "none" and bool(calls)) or
                        (choice == "required" and not calls) or
@@ -315,6 +336,11 @@ class HTTPModel:
             event["error_type"] = type(error).__name__
             if isinstance(error, httpx.HTTPStatusError):
                 event["http_status"] = error.response.status_code
+            # 未建立连接、或服务商以 4xx 拒绝（含 429）时没有生成，可确定不计费。
+            # 读超时、5xx 和流中断可能已经计费，仍记为未知。
+            event["unbilled"] = not raw and (
+                isinstance(error, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout))
+                or (isinstance(error, httpx.HTTPStatusError) and 400 <= error.response.status_code < 500))
         self._observe(event)
 
     def complete(self, messages: list[Message], tools: list[ToolSpec] | None = None) -> ModelReply:
@@ -357,6 +383,9 @@ class HTTPModel:
                                 headers=self.headers(), json=body, timeout=self._timeout()) as response:
             self._local.response_received = True
             self._local.request_id = response.headers.get("request-id") or response.headers.get("x-request-id")
+            if response.is_error:
+                # 流式响应体默认不读取；上下文超限等错误详情只在响应体里，抛出前先读出。
+                response.read()
             response.raise_for_status()
             for event in sse_data(response.iter_lines()):
                 self._timeout()

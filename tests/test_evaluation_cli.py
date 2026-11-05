@@ -129,3 +129,42 @@ def test_deepseek_default_and_known_explicit_routes(api, expected, monkeypatch):
     assert model_base_url(args) == expected
     args.base_url = "https://proxy.invalid/custom"
     assert model_base_url(args) == args.base_url
+
+
+def test_forced_tool_choice_and_final_schema_do_not_trap_loop_or_reach_subagent(tmp_path, monkeypatch, capsys):
+    schema_path = tmp_path / "schema.json"
+    schema_path.write_text(json.dumps({"type": "object", "properties": {"answer": {"type": "string"}},
+                                       "required": ["answer"], "additionalProperties": False}))
+    parent, child = [], []
+
+    def reply(message, reason):
+        return httpx.Response(200, json={"choices": [{"message": message, "finish_reason": reason}],
+                                         "usage": {"prompt_tokens": 10, "completion_tokens": 2}})
+
+    def handle(request):
+        body = json.loads(request.content)
+        if "只读调查" in body["messages"][0]["content"]:
+            child.append(body)
+            return reply({"role": "assistant", "content": "结论：在 notes.md。"}, "stop")
+        parent.append(body)
+        if body.get("tool_choice"):
+            return reply({"role": "assistant", "content": None, "tool_calls": [{"id": "d1", "type": "function",
+                          "function": {"name": "Delegate", "arguments": json.dumps({"task": "找笔记"})}}]}, "tool_calls")
+        return reply({"role": "assistant", "content": json.dumps({"answer": "notes.md"})}, "stop")
+
+    with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+        monkeypatch.setattr("minicode.cli.create_model", lambda config: create_model(config, client))
+        monkeypatch.setenv("MINICODE_API_KEY", "fixture-key")
+        code = main(["--cwd", str(tmp_path), "--provider", "openai", "--model", "gpt-4.1", "--subagents",
+                     "--tool-choice", "tool:Delegate", "--response-format", "json_schema",
+                     "--response-schema", str(schema_path), "--json", "-p", "where are the notes?"])
+    events = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert code == 0 and events[-1]["status"] == "success"
+    # 强制选择只作用于第一次请求；工具结果回来后交回服务商默认，任务才能结束。
+    assert parent[0]["tool_choice"] == {"type": "function", "function": {"name": "Delegate"}}
+    assert len(parent) == 2 and "tool_choice" not in parent[1]
+    assert all(body["response_format"]["type"] == "json_schema" for body in parent)
+    # 子 Agent 没有 Delegate 工具，且只返回散文摘要：两项父任务控制都不能继承。
+    assert len(child) == 1 and "tool_choice" not in child[0] and "response_format" not in child[0]
+    tool_results = [event for event in events if event["type"] == "tool_result"]
+    assert tool_results and not tool_results[0]["is_error"]

@@ -118,7 +118,12 @@ class RunRecorder:
                     self._completed_requests.add(identity)
                 self.requests += 1
                 normalized, raw = event.get("normalized_usage"), event.get("usage")
-                parts = usage_parts(raw, normalized) if isinstance(raw, dict) and isinstance(normalized, dict) else None
+                if event.get("unbilled") and not raw:
+                    # 一次被拒绝后重试的 429 不应让整次运行的费用变成未知。
+                    normalized = {"input_tokens": 0, "output_tokens": 0}
+                    parts = {"input_tokens": 0, "cache_read_tokens": 0, "cache_write_tokens": 0, "output_tokens": 0}
+                else:
+                    parts = usage_parts(raw, normalized) if isinstance(raw, dict) and isinstance(normalized, dict) else None
                 if parts is None:
                     self.unknown_usage += 1
                     event["estimated_cost"] = None

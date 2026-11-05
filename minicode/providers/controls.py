@@ -102,9 +102,16 @@ def validate_controls(c):
         if c.temperature is not None or c.top_p is not None:
             if c.model == "o3" or (c.model in ("gpt-5.4", "gpt-5.2") and effort not in (None, "none")):
                 raise ValueError("此推理模式不支持 temperature/top_p")
+        if c.response_format == "json_schema":
+            # 请求按 strict=true 发送；在配置阶段拒绝，而不是每次请求时才失败。
+            strict_schema(c.response_schema)
 
 
-def request_controls(c, tools):
+_CONFIGURED = object()
+
+
+def request_controls(c, tools, *, tool_choice=_CONFIGURED):
+    """tool_choice 可由适配器按本轮状态覆盖；None 表示本轮不发送。"""
     result = {}
     api, provider = c.api, c.provider.lower()
     for name in ("temperature", "top_p"):
@@ -129,7 +136,7 @@ def request_controls(c, tools):
                 result["output_config"] = {"effort": effort}
             else:
                 result["reasoning_effort"] = effort
-    choice = c.tool_choice
+    choice = c.tool_choice if tool_choice is _CONFIGURED else tool_choice
     if choice is not None:
         if choice not in ("none", "auto") and not tools:
             raise ValueError("强制工具选择需要提供工具")
@@ -178,44 +185,87 @@ def strict_schema(schema):
                 strict_schema(item)
 
 
-def strict_tool_schema(schema):
+def strict_tool_schema(schema, root=None):
     """Represent optional arguments as nullable required fields on the wire only."""
+    # null 是否原本合法要按原始根 schema 判断，属性里的 $ref 才能解析到 $defs。
+    root = schema if root is None else root
+    validator = Draft202012Validator(root if isinstance(root, dict) else {})
     schema = copy.deepcopy(schema)
     if not isinstance(schema, dict):
         return schema
     for key in ("anyOf", "oneOf", "allOf"):
         if key in schema:
-            schema[key] = [strict_tool_schema(item) for item in schema[key]]
+            schema[key] = [strict_tool_schema(item, root) for item in schema[key]]
     if isinstance(schema.get("items"), dict):
-        schema["items"] = strict_tool_schema(schema["items"])
+        schema["items"] = strict_tool_schema(schema["items"], root)
     for key in ("$defs", "definitions"):
         if key in schema:
-            schema[key] = {name: strict_tool_schema(item) for name, item in schema[key].items()}
+            schema[key] = {name: strict_tool_schema(item, root) for name, item in schema[key].items()}
     if schema.get("type") == "object" or "properties" in schema:
         if schema.get("additionalProperties", False) is not False:
             raise ValueError("strict 工具不支持开放 additionalProperties")
         required = set(schema.get("required", []))
         props = {}
         for name, item in schema.get("properties", {}).items():
-            converted = strict_tool_schema(item)
-            if name not in required and not Draft202012Validator(item).is_valid(None):
+            converted = strict_tool_schema(item, root)
+            if name not in required and not validator.evolve(schema=item).is_valid(None):
                 converted = {"anyOf": [converted, {"type": "null"}]}
             props[name] = converted
         schema.update(properties=props, required=list(props), additionalProperties=False)
     return schema
 
 
-def restore_optional_arguments(value, schema):
-    """Remove only nulls introduced by strict_tool_schema, leaving genuine nullable data."""
+def _resolve(schema, root):
+    """跟随本地 $ref（#/...）；循环或外部引用原样返回。"""
+    seen = set()
+    while isinstance(schema, dict) and isinstance(schema.get("$ref"), str) and schema["$ref"].startswith("#"):
+        ref = schema["$ref"]
+        if ref in seen:
+            return {}
+        seen.add(ref)
+        target = root
+        for token in ref[1:].lstrip("/").split("/") if ref != "#" else []:
+            token = token.replace("~1", "/").replace("~0", "~")
+            if not isinstance(target, dict) or token not in target:
+                return schema
+            target = target[token]
+        # 2020-12 允许 $ref 旁边还有其他约束；两部分都要参与还原。
+        siblings = {key: value for key, value in schema.items() if key != "$ref"}
+        schema = {"allOf": [target, siblings]} if siblings else target
+    return schema
+
+
+def restore_optional_arguments(value, schema, root=None):
+    """Remove only nulls introduced by strict_tool_schema, leaving genuine nullable data.
+
+    strict_tool_schema also rewrites objects reached through $defs and anyOf/oneOf/allOf,
+    so restoration follows the same paths against the original schema.
+    """
+    root = schema if root is None else root
+    schema = _resolve(schema, root)
     if not isinstance(schema, dict):
         return value
+    validator = Draft202012Validator(root if isinstance(root, dict) else {})
+
+    def accepts(candidate, subschema):
+        return validator.evolve(schema=subschema).is_valid(candidate)
+
+    for branch in schema.get("allOf", []):
+        value = restore_optional_arguments(value, branch, root)
+    for key in ("anyOf", "oneOf"):
+        for branch in schema.get(key, []):
+            # 选第一个在还原后满足原 schema 的分支；都不满足时保持原值，交给工具校验报错。
+            candidate = restore_optional_arguments(value, branch, root)
+            if accepts(candidate, branch):
+                value = candidate
+                break
     if isinstance(value, dict):
         properties = schema.get("properties", {})
         required = set(schema.get("required", []))
-        return {name: restore_optional_arguments(item, properties.get(name, {}))
+        return {name: restore_optional_arguments(item, properties.get(name, {}), root)
                 for name, item in value.items()
                 if not (item is None and name in properties and name not in required and
-                        not Draft202012Validator(properties[name]).is_valid(None))}
-    if isinstance(value, list):
-        return [restore_optional_arguments(item, schema.get("items", {})) for item in value]
+                        not accepts(None, properties[name]))}
+    if isinstance(value, list) and isinstance(schema.get("items"), dict):
+        return [restore_optional_arguments(item, schema["items"], root) for item in value]
     return value

@@ -47,7 +47,7 @@ class AnthropicModel(HTTPModel):
         if tools:
             body["tools"] = [{"name": t.name, "description": t.description,
                               "input_schema": self.tool_schema(t.parameters), **({"strict": True} if self.config.strict_tools else {})} for t in tools]
-        body.update(self.controls(tools))
+        body.update(self.controls(tools, messages))
         return body
 
     def decode(self, response):

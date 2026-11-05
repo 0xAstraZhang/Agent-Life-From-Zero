@@ -31,7 +31,7 @@ class ChatCompletionsModel(HTTPModel):
             body["tools"] = [{"type": "function", "function": {
                 "name": t.name, "description": t.description, "parameters": self.tool_schema(t.parameters),
                 "strict": self.config.strict_tools}} for t in tools]
-        body.update(self.controls(tools))
+        body.update(self.controls(tools, messages))
         return body
 
     def decode(self, response):
