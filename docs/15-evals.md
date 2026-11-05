@@ -1,122 +1,156 @@
-# 第 15 章：让程序检查 Agent 是否做成了任务
+# 第 15 章：亲手给 Agent 的任务写验收
 
-上一章：[MCP](14-mcp.md) · 下一章：[交付](16-shipping.md)
+上一章：[MCP](14-mcp.md) · 下一章：[命令行入口](16-shipping.md)
 
-本章先只评测一个真实任务：文件里是 `answer = 41`，让 Agent 改成 `answer = 42`，由独立代码检查文件。先把“任务 → 运行 → 验收”做通，再增加预算、任务集合和失败分类。
+继续在自己的 `my-agent/` 中写代码。本章先做一项真实任务：把文件中的 41 改成 42，由独立的 Python 判断检查结果。再把同一个验收过程扩成两个相互隔离的任务。
 
-```bash
-uv run python scripts/check_tutorial.py --chapter 15 --export /tmp/minicode-ch15
-cd /tmp/minicode-ch15
-uv sync
-uv run python examples/15_evals.py --step minimal
+我们只复用前面写出的 `Agent` 和 `model.open_model()`。本章没有依赖尚未编写的命令行程序，也没有预先规定模型必须怎样回答的假模型。
+
+## 1. 先写任务与验收函数
+
+新建 `evaluation.py`，完整写入：
+
+```python file=evaluation.py step=minimal
+from agent import Agent
+
+
+def evaluate(model, root, initial=41, desired=42):
+    root.mkdir(parents=True, exist_ok=True)
+    target = root / "answer.py"
+    target.write_text(f"answer = {initial}\n", encoding="utf-8")
+    calls = []
+
+    def read_answer():
+        calls.append("ReadAnswer")
+        return target.read_text(encoding="utf-8")
+
+    def set_answer(value):
+        calls.append("SetAnswer")
+        target.write_text(f"answer = {value}\n", encoding="utf-8")
+        return target.read_text(encoding="utf-8")
+
+    tools = {
+        "ReadAnswer": {
+            "spec": {"type": "function", "function": {
+                "name": "ReadAnswer", "description": "读取本次任务的 answer.py。",
+                "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+            }},
+            "execute": read_answer,
+            "read_only": True,
+        },
+        "SetAnswer": {
+            "spec": {"type": "function", "function": {
+                "name": "SetAnswer", "description": "把本次任务文件的 answer 改成给定整数。",
+                "parameters": {
+                    "type": "object", "properties": {"value": {"type": "integer"}},
+                    "required": ["value"], "additionalProperties": False,
+                },
+            }},
+            "execute": set_answer,
+            "read_only": False,
+        },
+    }
+    answer = Agent(model, tools).run(
+        f"先用 ReadAnswer 读取文件，再用 SetAnswer 把 answer 改为 {desired}。完成后说明结果。"
+    )
+    file_ok = target.read_text(encoding="utf-8") == f"answer = {desired}\n"
+    actions_ok = ("ReadAnswer" in calls and "SetAnswer" in calls
+                  and calls.index("ReadAnswer") < calls.index("SetAnswer"))
+    return {
+        "initial": initial, "desired": desired,
+        "file_passed": file_ok, "actions_passed": actions_ok,
+        "passed": file_ok and actions_ok, "answer": answer,
+    }
 ```
 
-真实 API 配置沿用[第 00 章](00-setup.md)。本章直接使用 Python 入口，不依赖下一章才创建的 CLI。完整文件是 [lessons/ch15.py](../lessons/ch15.py)。
+这两个工具只操作本次临时目录中的一个文件，不能选择其他路径。本章明确允许这项小修改。
 
-## 1. 先写验收条件
+先读函数末尾：验收直接打开文件，检查它是否真的改变；还检查指定的动作是否发生。模型最后一句话只是记录，不能决定 `passed`。
 
-实验在临时目录里创建一份文件：
+再回头读前面的工具定义。它们使用第 02–03 章已经写过的注册表格式，没有引入新的 Agent 机制。
 
-```python
-target = root / "answer.py"
-target.write_text("answer = 41\n", encoding="utf-8")
+## 2. 运行一个真实任务
+
+替换 `demo.py`：
+
+```python file=demo.py step=minimal
+import json
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from evaluation import evaluate
+from model import open_model
+
+with TemporaryDirectory() as directory, open_model() as model:
+    report = evaluate(model, Path(directory))
+    print(json.dumps(report, ensure_ascii=False))
+    if not report["passed"]:
+        raise RuntimeError("任务未通过独立验收")
 ```
 
-目标是文件内容准确变成下面这样：
+运行 `uv run python demo.py`。预期报告中 `file_passed`、`actions_passed` 和 `passed` 都为 `true`。
 
-```python
-file_passed = target.read_text(encoding="utf-8") == "answer = 42\n"
+现在把任务改成另一个目标数，同时改变验收的 `desired`。验收判断必须来自任务要求，不能从模型回答里提取一个数字再拿它当答案。
+
+## 3. 增强：把一个验收扩成一组任务
+
+新建 `evaluation_suite.py`：
+
+```python file=evaluation_suite.py step=enhanced
+from evaluation import evaluate
+
+
+def evaluate_suite(model, root):
+    reports = []
+    tasks = [(41, 42), (99, 100)]
+    for index, (initial, desired) in enumerate(tasks):
+        directory = root / f"task-{index}"
+        report = evaluate(model, directory, initial=initial, desired=desired)
+        reports.append(report)
+    passed = sum(report["passed"] for report in reports)
+    return {"passed": passed, "total": len(reports), "reports": reports}
 ```
 
-这个判断在 Agent 运行结束后执行。它不看模型是否说了“完成”，而是直接读取实际产物。
+每次 `evaluate()` 都创建一个新的 Agent 和新的目录。前一个任务的消息、文件修改不会进入后一个任务。
 
-## 2. 让真实 Agent 尝试任务
+替换 `demo.py`：
 
-沿用前面的工具和权限，只允许本次需要的 Edit：
+```python file=demo.py step=enhanced
+import json
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
-```python
-runner = PermissionRunner(
-    ToolRunner(build_coding_tools(include_bash=False), ToolContext(root)), allowed=["Edit"])
-events = list(Agent(model, runner, max_turns=6).run(
-    "先读取 answer.py，再用 Edit 将 answer 的值从 41 改成 42，其他内容保持原样。"))
-final = events[-1]
-file_passed = target.read_text(encoding="utf-8") == "answer = 42\n"
-report = {
-    "status": final["status"],
-    "file_passed": file_passed,
-    "passed": final["status"] == "success" and file_passed,
-}
+from evaluation_suite import evaluate_suite
+from model import open_model
+
+with TemporaryDirectory() as directory, open_model() as model:
+    report = evaluate_suite(model, Path(directory))
+    print(json.dumps(report, ensure_ascii=False))
+    print(f"任务通过：{report['passed']}/{report['total']}")
+    if report["passed"] != report["total"]:
+        raise RuntimeError("有任务未通过验收")
 ```
 
-`status` 回答“Agent 是否正常结束”，`file_passed` 回答“任务是否做成”。两个条件都满足才算通过。工具中途出错、随后正确重试并完成任务，不必自动判整项失败。
+再次运行 `uv run python demo.py`。先看每一项的文件检查，再看汇总的 `2/2`，不要只保留一个总通过率。
 
-运行最小检查点后应看到包含 `passed` 的 JSON 报告。真实模型可能失败；先看最后的文件与事件，再决定原因。修改任务目标和验收条件，重新做一次。
+## 4. 看到失败以后再增加分类
 
-## 3. 增强检查点：给同一个任务加用量预算
+到这里，我们手写了任务初始状态、工具、真实运行、独立验收、隔离目录和多任务汇总。下一步可以按遇到的问题扩展：
 
-```bash
-uv run python examples/15_evals.py --step enhanced
-```
-
-只把模型换成预算包装器，保留刚才的任务和验收函数：
-
-```python
-budget = Budget(token_limit=10_000)
-model = BudgetModel(model, budget)
-report = evaluate(model, root)
-```
-
-[阶段 budget.py](../lessons/stages/15/minicode/budget.py)的非流式逻辑是：
-
-```python
-def complete(self, messages, tools=()):
-    self.budget.check()
-    reply = self.inner.complete(messages, tools)
-    self.budget.record(reply.usage)
-    return reply
-```
-
-现在再解释它的限制：这是下一次请求前的软上限，当前请求可能超额；缺少 usage 的请求不能恢复完整账单。流式结果在最终 `done` 上累计一次。父子 Agent 共用一个预算对象，摘要请求也经过预算边界：
-
-```text
-CompactingModel → BudgetModel → 协议适配器
-```
-
-## 4. 从一个任务扩展到一组任务
-
-先把输入、目标和验收函数从 `evaluate()` 中提成参数，再逐项运行。每项使用独立的初始目录，避免上一项修改影响下一项。
-
-| 任务 | 独立验收 |
+| 现象 | 下一项检查 |
 | --- | --- |
-| 修改一个常量 | 指定文件内容符合预期 |
-| 查找函数调用 | 返回的路径和行号确实存在 |
-| 修复一个错误 | 原有测试和复现错误的用例通过 |
-| 写入被拒绝 | 对应文件没有产生，结果说明了拒绝 |
+| 模型说完成，文件没变 | `file_passed` 应为 false |
+| 文件变了，但跳过要求的读取 | `actions_passed` 应为 false |
+| 模型请求失败 | 单独记录连接、认证或协议错误 |
+| 达到 Agent 轮数上限 | 记录任务未完成，而不是给文件验收补一个成功 |
+| 多次运行结果不同 | 保留每次报告，统计波动 |
 
-重复执行真实任务，记录模型、协议、任务版本和参数，再统计通过率。固定剧本只证明评测程序接线正确，不能作为模型成功率。
+添加新的任务时，先写确定的验收条件，再让模型尝试。代码修复任务可以运行测试；查找任务可以核对路径和行号；拒绝写入任务可以检查文件没有产生。
 
-[evals.py](../minicode/evals.py)提供三个确定的离线回归案例：正常编辑、拒绝写入和未知工具。掌握真实任务的验收后，再用这些剧本检查验收程序是否会被一句“完成”误导。
+第 18 章将手写请求计时、连接重试和共同期限。服务商 token 预算与费用换算属于[最终实现参考](18-runtime-reference.md)，本章没有通过一次示例就实现这些能力。
 
-## 5. 再把失败分开
+## 自检
 
-| 结果 | 含义 |
-| --- | --- |
-| `success` 但验收失败 | 模型结束了任务，实际目标没有达成 |
-| `max_turns` | 没在限定轮数内结束 |
-| `length` | 输出截断，不能执行半成品调用 |
-| `refusal` | 模型拒绝，不是网络故障 |
-| `error` | 继续查看认证、传输、协议或执行器错误 |
-| `cancelled` | 任务被中断，检查未完成调用的状态 |
+把 `evaluate()` 中的任务临时改成“不要调用工具，只回答完成”，其他代码保持不变。运行后应失败，而不是因为文本里有“完成”就通过。完成这个反例后恢复任务。
 
-内核测试、协议测试与真实任务评测各自验证不同内容。最终费用记录在[第 18 章](18-runtime.md)加入；这里先累计服务商返回的 token。
-
-## 验收与练习
-
-```bash
-uv run python examples/15_evals.py --step minimal --offline
-uv run python examples/15_evals.py --step enhanced --offline
-uv run python -m pytest tests/test_lesson15.py tests/test_budget.py tests/test_evals.py -q
-uv run python -m minicode.evals
-```
-
-把离线剧本改成只回答“完成”，确认 `status=success` 但 `passed=false`。再让 Edit 的旧字符串不匹配，检查失败能否反映在最终文件验收里。最后添加一个真实任务，先写验收函数再运行模型。
+离线回归可以为 HTTP 返回固定响应，验证验收程序本身。真实模型效果仍然以你刚才实际运行的任务结果为准。仓库中的[离线评测参考](../minicode/evals.py)可以在完成手写版后对照。

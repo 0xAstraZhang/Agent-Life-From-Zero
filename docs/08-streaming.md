@@ -1,154 +1,217 @@
-# 第 8 章：先显示文本增量，再接回工具循环
+# 第 8 章：自己读出文本增量，再接回工具循环
 
 [上一章：权限](07-permissions.md) · [目录](README.md) · [下一章：上下文](09-context.md)
 
-前面程序等模型说完才显示回答。本章先让终端显示逐段到达的文字，再把完整回复接回已有循环。工具仍在完整调用到达之后执行。
+继续自己的 `my-agent` 项目。前面等待完整 JSON 后才显示回答；现在直接用已经安装的 `httpx` 读取 SSE。先显示一段真实文本，再拼出 Agent 已认识的完整回复。
 
-先在教程仓库根目录导出本章，再进入练习目录：
+本章沿用 Chat Completions。`model.open_model()` 仍是你第 00 章写的连接配置；模型客户端公开 `model`、`base_url`、`api_key` 和 `client`，供这里复用。
+
+## 1. 先定义如何读一个 SSE 事件
+
+新建 `streaming.py`，完整写入：
+
+```python file=streaming.py step=text
+import json
+
+
+def sse_data(response):
+    data = []
+    for line in response.iter_lines():
+        if line == "":
+            if data:
+                yield "\n".join(data)
+                data = []
+        elif line.startswith("data:"):
+            data.append(line[5:].lstrip())
+    if data:
+        yield "\n".join(data)
+
+
+def stream_text(chat, prompt):
+    body = {"model": chat.model, "stream": True,
+            "messages": [{"role": "user", "content": prompt}]}
+    text, reason, finished = [], None, False
+    with chat.client.stream(
+        "POST", chat.base_url.rstrip("/") + "/chat/completions",
+        headers={"Authorization": f"Bearer {chat.api_key}"}, json=body,
+    ) as response:
+        response.raise_for_status()
+        for data in sse_data(response):
+            if data == "[DONE]":
+                finished = True
+                break
+            chunk = json.loads(data)
+            if chunk.get("error"):
+                raise RuntimeError("模型在生成过程中返回错误")
+            for choice in chunk.get("choices", []):
+                delta = choice.get("delta", {}).get("content")
+                if delta:
+                    text.append(delta)
+                    print(delta, end="", flush=True)
+                if choice.get("finish_reason"):
+                    reason = choice["finish_reason"]
+    if not finished or reason != "stop":
+        raise RuntimeError("没有收到完整的文本回复")
+    if not "".join(text).strip():
+        raise RuntimeError("没有收到文本增量")
+    return "".join(text)
+```
+
+先看 `sse_data()`：空行标记一个事件结束，多行 `data:` 组成同一个事件。`stream_text()` 再解析 JSON，从 `delta.content` 取文字立即显示。代码最后检查结束标记与停止原因，避免把连接断开当成完整回答。
+
+## 2. 先让终端显示文字
+
+完整替换 `demo.py`：
+
+```python file=demo.py step=text
+from model import open_model
+from streaming import stream_text
+
+
+def main():
+    with open_model() as chat:
+        stream_text(chat, "用两句话解释 Agent 怎样使用工具。")
+    print("\n文本已完整接收")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+运行第一个检查点：
 
 ```bash
-uv run python scripts/check_tutorial.py --chapter 08 --export /tmp/minicode-ch08
-cd /tmp/minicode-ch08
-uv sync
+uv run python demo.py
 ```
 
-导出目标须为空或尚不存在。以下命令在练习目录执行；真实调用沿用第 00 章的环境变量配置。
+文字会逐段到达，最后显示“文本已完整接收”。这一步没有工具，也不需要修改 Agent。你现在已经亲手写出了从 HTTP 流到终端输出的路径。
 
-## 1. 先只显示一段真实回答
+## 3. 再拼出一条完整回复
 
-```bash
-uv run python examples/08_streaming.py --step text
+接下来加入工具。模型可能先发 `{"a":`，下一段才发 `2,"b":3}`。先把参数按调用的 `index` 分别拼起来；不能收到一段参数就运行函数。
+
+完整替换 `streaming.py`。新的类继续提供 `.complete(messages, tools)`，因此已经写好的 Agent 可以直接使用它：
+
+```python file=streaming.py step=tools
+import json
+
+
+def sse_data(response):
+    data = []
+    for line in response.iter_lines():
+        if line == "":
+            if data:
+                yield "\n".join(data)
+                data = []
+        elif line.startswith("data:"):
+            data.append(line[5:].lstrip())
+    if data:
+        yield "\n".join(data)
+
+
+class StreamingChatModel:
+    def __init__(self, chat):
+        self.chat = chat
+
+    def complete(self, messages, tools=()):
+        body = {"model": self.chat.model, "messages": messages, "stream": True}
+        if tools:
+            body["tools"] = list(tools)
+        text, calls, reasoning = [], {}, []
+        reason, finished = None, False
+        with self.chat.client.stream(
+            "POST", self.chat.base_url.rstrip("/") + "/chat/completions",
+            headers={"Authorization": f"Bearer {self.chat.api_key}"}, json=body,
+        ) as response:
+            response.raise_for_status()
+            for data in sse_data(response):
+                if data == "[DONE]":
+                    finished = True
+                    break
+                chunk = json.loads(data)
+                if chunk.get("error"):
+                    raise RuntimeError("模型在生成过程中返回错误")
+                for choice in chunk.get("choices", []):
+                    delta = choice.get("delta", {})
+                    if delta.get("content"):
+                        text.append(delta["content"])
+                        print(delta["content"], end="", flush=True)
+                    if delta.get("reasoning_content"):
+                        reasoning.append(delta["reasoning_content"])
+                    for part in delta.get("tool_calls", []):
+                        index = part["index"]
+                        if index not in calls:
+                            calls[index] = {"id": "", "type": "function",
+                                            "function": {"name": "", "arguments": ""}}
+                        call = calls[index]
+                        call["id"] += part.get("id") or ""
+                        function = part.get("function", {})
+                        call["function"]["name"] += function.get("name") or ""
+                        call["function"]["arguments"] += function.get("arguments") or ""
+                    if choice.get("finish_reason"):
+                        reason = choice["finish_reason"]
+        if not finished or reason is None:
+            raise RuntimeError("流在完整回复到达之前结束")
+        message = {"role": "assistant", "content": "".join(text)}
+        if calls:
+            message["tool_calls"] = [calls[index] for index in sorted(calls)]
+        if reasoning:
+            message["reasoning_content"] = "".join(reasoning)
+        return {"message": message, "finish_reason": reason}
 ```
 
-真实模型用两句话解释 Agent。你会看见文本逐段出现，末尾显示本轮状态。先不调用工具，只观察“数据一段段到达”这件事。
+先追文本：到达时显示，结束后合成 `message.content`。再追工具：参数分片只写进 `calls`，完整结束后才作为 `message.tool_calls` 返回。两条路径在最后汇合成与前章相同的 `message`、`finish_reason`。
 
-完整检查点是 [streaming_prototype.py 中的 request_stream](../lessons/streaming_prototype.py)。它的正常路径只有这几步：
+适配器里面没有执行工具。Agent 拿到完整回复后，仍按原来的顺序记录助手消息、调用 runner、记录结果、再次请求模型。
 
-```python
-reply = None
-for event in model.stream(messages, tools):
-    if event.type == "text_delta":
-        print(event.text, end="", flush=True)
-    elif event.type == "done":
-        reply = event.reply
+## 4. 让已有 Agent 使用这个类
+
+完整替换 `demo.py`：
+
+```python file=demo.py step=tools
+from agent import Agent
+from model import open_model
+from streaming import StreamingChatModel
+
+
+TOOLS = {
+
+        "add": {
+            "spec": {"type": "function", "function": {
+                "name": "add", "description": "把两个整数相加",
+                "parameters": {"type": "object", "properties": {
+                    "a": {"type": "integer"}, "b": {"type": "integer"}},
+                    "required": ["a", "b"], "additionalProperties": False}}},
+            "execute": lambda a, b: str(a + b), "read_only": True,
+        }
+
+}
+
+
+def main():
+    with open_model() as chat:
+        agent = Agent(StreamingChatModel(chat), TOOLS)
+        agent.run("请调用 add 计算 2 加 3，再回答。")
+    results = [message for message in agent.history if message["role"] == "tool"]
+    if not results:
+        raise RuntimeError("没有发生工具往返")
+    if results[-1]["content"] != "5":
+        raise RuntimeError("工具没有返回正确结果")
+    print("\n工具结果已回传：", results[-1]["content"])
+
+
+if __name__ == "__main__":
+    main()
 ```
 
-`text_delta` 负责显示，`done` 携带本轮完整 `ModelReply`。完整函数在循环之后返回 `reply`；没有收到它就报告断流。先运行这个版本，确认模型接口、终端显示与完整回复各做什么。
+再运行 `uv run python demo.py`。模型先请求加法，收到本地结果后逐段显示回答，末尾说明工具结果已经回传。由于文本已经显示，不再打印 `Agent.run()` 的整段返回值。
 
-上面是函数中的正常路径片段；所需资源关闭与结束检查已放在链接的可运行版本中。第 5 节再逐一解释它们。
+要保留上一章审批，只需继续传入已经写好的 `runner`；流式输出没有改变工具执行的入口。
 
-## 2. 用完整回复继续工具往返
+## 5. 最后用失败说明边界
 
-现在运行第二个最小检查点：
+正常文本和工具往返都跑通后，再分别删除 `[DONE]`、截断参数字符串、把停止原因改为 `length`。没有完整回复时，StreamingChatModel 报错；已收到截断回复时，前章 Agent 的停止规则阻止工具执行。
 
-```bash
-uv run python examples/08_streaming.py --step tools
-```
+然后再考虑多个工具参数交错、流中断时关闭连接、用户中断工具时补记结果、最后才出现的用量。`with client.stream(...)` 已负责关闭响应；同一轮多个调用按 `index` 存放，参数不会混在一起。兼容服务返回的 `reasoning_content` 随助手消息保留，不作为普通文字显示。
 
-模型请求 `add`，本地执行，然后流式显示最终回答。[stream_roundtrip()](../lessons/streaming_prototype.py)沿用第一章的循环，只把等待回复的一行换掉：
-
-```python
-# 前章：
-reply = model.complete(history, runner.specs())
-# 本章：
-reply = request_stream(model, history, runner.specs())
-```
-
-取得完整回复之后，原来的三步仍然相同：
-
-```python
-history.append(reply.message)
-for call in tool_calls(reply.message):
-    result = runner.run(call)
-    history.append(Message("tool", [result]))
-```
-
-这两段是循环里的替换点，不是独立脚本。完整函数在无调用时返回回答，有调用时执行并进入下一轮；本练习最多请求 4 轮。
-
-本章不从终端显示过的文字重新拼历史。完整 assistant 消息可能同时含文本、工具调用以及续轮数据，应该直接使用 `done.reply.message`。
-
-工具参数增量可能是 `{"a":`，下一段才是 `2,"b":3}`。收到参数片段时不运行工具，等完整回复通过已有停止状态检查后再执行。这是流式工具循环的核心区别。
-
-## 3. 再把原型并入完整 Agent
-
-前两个检查点已经解释了变化。现在给现有 Agent 加流式选项：
-
-1. 模型接口增加 `stream()`，每次产生一个 `StreamEvent`。
-2. Agent 的请求步骤选择 `complete()` 或 `stream()`。
-3. 流式路径把显示事件交给终端，取得完整回复后回到原有循环。
-
-```python
-agent = Agent(model, runner, stream=True)
-for event in agent.run("请调用 add 计算 2 加 3，再回答"):
-    if event["type"] == "text_delta":
-        print(event["text"], end="", flush=True)
-    elif event["type"] == "result":
-        print("\n任务状态：", event["status"])
-```
-
-这里的 `runner` 仍可使用上一章的权限包装器。不要重建另一套审批或工具执行。终端已经显示了增量，结束时只打印状态，避免再显示一遍完整回答。
-
-```bash
-uv run python examples/08_streaming.py --step enhanced
-```
-
-完整文件分别是 [StreamEvent](../lessons/stages/08/minicode/types.py)、[模型接口](../minicode/model.py)和[本章 Agent](../lessons/stages/08/minicode/agent.py)。现在对照 `_request()` 与刚才的 `request_stream()`，再看流式分支如何接回 `run()`；无需一开始就整段抄写 Agent。
-
-## 4. 看到增量之后，再实现传输与协议解析
-
-统一事件先保留三个含义：
-
-| 事件 | 用途 |
-| --- | --- |
-| text_delta | 显示文本 |
-| tool_call_delta | 观察参数片段，不执行 |
-| done + ModelReply | 将完整回复交回循环 |
-
-HTTP 返回的是 SSE。`httpx` 读取字节与文本行，[sse_data()](../lessons/stages/08/minicode/providers/base.py)按空行组合一个事件，适配器解释事件数据。网络读取一次不等于收到一个完整事件。
-
-```text
-data: {"type":"response.output_text.delta","delta":"你好"}
-
-```
-
-先为你使用的协议写文本增量与完成事件，再扩展工具参数；其他协议仍是选修：
-
-- [Chat Completions](../lessons/stages/08/minicode/providers/chat.py)：显示 `delta.content`；工具片段按 `index` 分别积累。取得完成标记和用量后，将合成响应交给原来的 `decode()`。
-- [Responses](../lessons/stages/08/minicode/providers/responses.py)：显示 `response.output_text.delta`；结束事件中的完整 response 交给 `decode()`。参数增量的 item ID 要映射到实际 call ID。
-- [Anthropic](../lessons/stages/08/minicode/providers/anthropic.py)：按内容块积累文本或参数，直到 `message_stop` 再解码整条消息。思考块与签名随对应内容块保存。
-
-复用非流式 `decode()`，停止状态和工具语义就不会出现两套规则。
-
-## 5. 最后补上断流、中断与清理
-
-先用具体故障检验刚才的流程：
-
-| 故障 | 需要补什么 |
-| --- | --- |
-| 文本到一半连接关闭，没有 done | 报告断流，不执行参数片段 |
-| 收到完整回复后还有额外数据 | 拒绝不一致的事件序列 |
-| 完整回复标为 length | 保留已有终止规则，不执行截断调用 |
-| 用户停止读取流 | 关闭迭代器与 HTTP 响应 |
-| 工具已开始执行时用户中断 | 为未完成调用补带 ID 的中断结果 |
-
-`request_stream()` 的 `finally` 关闭流，循环后的检查拒绝缺失完整回复。完整 Agent 的 `repair_pending()` 则处理另一种情况：调用已写入历史，但工具结果尚未返回。补记只说明“结果未知”，不自动重跑写操作。
-
-实现 SSE 分帧后，再测试多行 `data:`、注释心跳、多个工具参数交错和最后才出现的用量。Anthropic 的输出用量事件是累计值，不应每次再次相加。这些都是在正常文本与工具流程跑通后增加的验证。
-
-## 6. 验收每个检查点
-
-默认命令使用真实 API；离线回归明确传 `--offline`：
-
-```bash
-uv run python examples/08_streaming.py --step text --offline
-uv run python examples/08_streaming.py --step tools --offline
-uv run python examples/08_streaming.py --step enhanced --offline
-uv run python examples/08_streaming.py --step transport --offline
-uv run python -m pytest tests/test_streaming.py tests/test_providers.py -q
-```
-
-前三条验证显示、完整回复与循环组合，最后一条实验用固定 HTTP SSE 数据检查三个协议。再删除测试流中的结束事件，确认工具没有执行；这比只确认终端出现文字更能证明循环正确。
-
-本章新增 [streaming_prototype.py](../lessons/streaming_prototype.py)和[实验入口](../examples/08_streaming.py)，替换模型、测试替身、适配器与 Agent 的本章版本，完整清单见[阶段文件](../lessons/stages.json)。
-
-协议资料：[Chat 流事件](https://developers.openai.com/api/reference/resources/chat/subresources/completions/streaming-events)、[Responses 流事件](https://developers.openai.com/api/reference/resources/responses/streaming-events)、[Anthropic 流事件](https://platform.claude.com/docs/en/build-with-claude/streaming)。下一章向同一个模型请求补充项目上下文。
+章末可选参考：[仓库完整流式 Agent](../lessons/stages/08/minicode/agent.py)、[仓库实验](../examples/08_streaming.py)。当前手写项目不导入这些实现。

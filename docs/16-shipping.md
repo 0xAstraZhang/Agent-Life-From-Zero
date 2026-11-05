@@ -1,156 +1,182 @@
-# 第 16 章：从一个 main 函数做成命令行程序
+# 第 16 章：亲手写出命令行入口
 
 上一章：[评测](15-evals.md) · 下一章：[沙箱](17-sandbox.md)
 
-先让终端中的一句话进入已有 Agent，并把结果打印回来。本章第一版只做这件事，再增加交互、配置选项和安装包。
+继续使用自己的 `my-agent/`。先把终端的一句话传给已经写好的 Agent，再把结果打印出来。之后只增加一个显示选项和明确的退出码。
 
-```bash
-uv run python scripts/check_tutorial.py --chapter 16 --export /tmp/minicode-ch16
-cd /tmp/minicode-ch16
-uv sync
-uv run python examples/16_shipping.py --step minimal -p "用 Glob 列出 Python 文件"
+本章复用前面的 `Agent` 和 `model.open_model()`，自己编写工具、参数解析与 `main()`，不调用仓库的成品 CLI。
+
+## 1. 给入口准备一个可观察的只读工具
+
+新建 `cli_tools.py`：
+
+```python file=cli_tools.py step=minimal
+
+def build_tools(root, calls):
+    def list_files():
+        calls.append("ListFiles")
+        return "\n".join(sorted(path.name for path in root.iterdir()))
+
+    return {"ListFiles": {
+        "spec": {"type": "function", "function": {
+            "name": "ListFiles", "description": "列出当前工作目录的直接子项。",
+            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+        }},
+        "execute": list_files,
+        "read_only": True,
+    }}
 ```
 
-API 配置沿用[第 00 章](00-setup.md)。完整练习在 [lessons/ch16.py](../lessons/ch16.py)；完整 CLI 的本章版本在 [阶段 cli.py](../lessons/stages/16/minicode/cli.py)。
+这里先只提供 ListFiles。程序运行后，除了看到回答，还能检查模型是否真的使用了这个工具。
 
-## 1. 写一个最小入口
+## 2. 把参数、组装和显示写进自己的 main
 
-把下面的完整程序保存为本章目录中的 `mycli.py`。`open_model()` 复用前面已经建立的真实 API 配置；`--offline` 只用于回归。
+新建 `cli.py`，完整写入：
 
-```python
+```python file=cli.py step=minimal
 import argparse
 from pathlib import Path
 
-from lessons.runtime import open_model, print_event
-from minicode.agent import Agent
-from minicode.coding_tools import build_coding_tools
-from minicode.permissions import PermissionRunner
-from minicode.testing import call
-from minicode.tool import ToolContext, ToolRunner
+from agent import Agent
+from cli_tools import build_tools
+from model import open_model
+
+DEFAULT_PROMPT = "必须先调用 ListFiles 列出目录，再简要说明结果。"
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("-p", "--prompt", required=True)
-    parser.add_argument("--api", default="openai-chat")
-    parser.add_argument("--offline", action="store_true")
-    args = parser.parse_args()
-    script = [call("Glob", pattern="*.py"), "已列出 Python 文件。"]
-    with open_model(args, script) as model:
-        tools = build_coding_tools(include_bash=False)
-        runner = PermissionRunner(ToolRunner(tools, ToolContext(Path.cwd())), read_only=True)
-        for event in Agent(model, runner, max_turns=6).run(args.prompt):
-            print_event(event)
-            if event["type"] == "result":
-                status = event["status"]
-    return 0 if status == "success" else 1
+def parser():
+    result = argparse.ArgumentParser(description="我自己写的 Agent")
+    result.add_argument("-p", "--prompt", default=DEFAULT_PROMPT)
+    result.add_argument("--cwd", type=Path, default=Path.cwd())
+    return result
+
+
+def run(args):
+    root = args.cwd.expanduser().resolve()
+    if not root.is_dir():
+        raise ValueError("工作目录不存在")
+    calls = []
+    with open_model() as model:
+        agent = Agent(model, build_tools(root, calls))
+        answer = agent.run(args.prompt)
+    if args.prompt == DEFAULT_PROMPT and "ListFiles" not in calls:
+        raise RuntimeError("默认任务没有实际列出目录")
+    return {"answer": answer, "tool_calls": calls, "cwd": str(root)}
+
+
+def main(argv=None):
+    args = parser().parse_args(argv)
+    result = run(args)
+    print(result["answer"])
+    print("实际工具：", ", ".join(result["tool_calls"]))
+    return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
 ```
 
-运行：
+沿着顺序读：`parser()` 接收任务，`run()` 创建模型与工具并调用 Agent，`main()` 显示结果。工具循环仍在前面亲手写好的 Agent 中。
+
+## 3. 运行最小入口
+
+替换 `demo.py`：
+
+```python file=demo.py step=minimal
+from cli import main
+
+raise SystemExit(main())
+```
+
+运行 `uv run python demo.py`，应看到真实回答和 `实际工具： ListFiles`。再直接使用自己的 CLI：
 
 ```bash
-uv run python mycli.py -p "用 Glob 列出 Python 文件"
+uv run python cli.py --cwd .
+uv run python cli.py -p "先列出目录，再说明有哪些 Python 文件"
 ```
 
-沿着五步读代码：解析任务 → 创建模型 → 组装工具 → 运行 Agent → 显示事件。CLI 没有复制工具循环。只读执行层沿用第 07 章的实现。
+默认任务会检查 ListFiles 是否真实执行。自选任务的完成条件由你定义；不能假定每个任务都必须列目录。
 
-## 2. 先增加一个确实需要的选项
+## 4. 增强：JSON 输出与明确的失败出口
 
-第一次扩展只添加 `--cwd`。在解析参数时加入：
+现在有了可以工作的入口，再增加 `--json`。新建 `cli_full.py`，复用刚才的解析器和组装函数：
 
-```python
-parser.add_argument("--cwd", type=Path, default=Path.cwd())
+```python file=cli_full.py step=enhanced
+import json
+import sys
+
+import httpx
+
+from cli import parser, run
+
+
+def main(argv=None):
+    arguments = parser()
+    arguments.add_argument("--json", action="store_true", help="输出一行 JSON")
+    args = arguments.parse_args(argv)
+    try:
+        result = run(args)
+    except (ValueError, RuntimeError, OSError, httpx.HTTPError) as error:
+        print(f"运行失败：{error}", file=sys.stderr)
+        return 1
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False))
+    else:
+        print(result["answer"])
+        print("实际工具：", ", ".join(result["tool_calls"]))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
 ```
 
-创建 `ToolContext` 时用 `args.cwd.expanduser().resolve()` 代替 `Path.cwd()`。运行同一个 prompt、传入不同目录，观察工具结果如何变化。[最小检查点](../lessons/ch16.py)已经包含这项扩展，也会检查目录是否存在：
+替换 `demo.py`：
+
+```python file=demo.py step=enhanced
+from cli_full import main
+
+raise SystemExit(main(["--json"]))
+```
+
+运行 `uv run python demo.py`。同一个任务仍调用 ListFiles，但结果变成 JSON。随后运行：
 
 ```bash
-uv run python examples/16_shipping.py --step minimal --cwd . -p "列出 Python 文件"
+uv run python cli_full.py --json
+uv run python cli_full.py --cwd directory-that-does-not-exist
 ```
 
-`--api`、`--model` 等参数也按同样方法传给模型配置，不能把服务商判断放进 Agent Loop。
+第二条应显示目录错误并以退出码 1 结束，没有发送模型请求。先让这些简单出口清楚，再逐项增加交互输入、会话恢复和流式显示。
 
-## 3. 增强检查点：接回已有组件
+## 5. 在自己的项目注册安装入口
 
-```bash
-uv run python examples/16_shipping.py --step enhanced -p "查看项目结构并总结"
-```
+将第 02 章的 `pyproject.toml` 替换为下面的完整配置。保留已使用的 httpx 与 jsonschema，再添加构建后端、模块列表和命令入口：
 
-增强检查点调用本阶段完整 CLI，以只读模式运行同一个任务。现在再读 [cli.py](../lessons/stages/16/minicode/cli.py)，按功能逐组扩展自己的 `main()`：
+```toml file=pyproject.toml step=enhanced
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
 
-| 从最小版遇到的需求 | 增加什么 |
-| --- | --- |
-| 连续输入多个任务 | 输入循环，`exit`/`quit` 结束 |
-| 调整连接方式 | 环境变量默认值，命令行覆盖 |
-| 显示生成过程 | `--stream` 选择模型流，`--json` 选择显示格式 |
-| 保留进度 | `--session` 和 `--resume` 调用已有会话层 |
-| 使用已有扩展 | 注册计划、Skill、Delegate 和 MCP 工具 |
-| 正常或异常退出都释放资源 | 用 `ExitStack` 管理模型和子进程 |
+[project]
+name = "my-agent"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = ["httpx>=0.28,<1", "jsonschema>=4.23,<5"]
 
-完整调用方向仍然是：
-
-```text
-CLI → 创建 model 与 runner → Agent → 事件显示
-          ↓                     ↑
-      预算 / 压缩              会话层
-```
-
-组装时保留同一个审批对象和工具状态。非交互的 `-p` 没有审批回调，需要写操作时显式配置 `--allow-tool`；`--read-only` 始终优先。Bash 的操作系统隔离在下一章实现。
-
-## 4. 注册可安装的命令
-
-先有可以运行的 `main()`，再在 `pyproject.toml` 声明入口：
-
-```toml
 [project.scripts]
-minicode = "minicode.cli:main"
+my-agent = "cli_full:main"
+
+[tool.setuptools]
+py-modules = ["cli", "cli_full", "cli_tools", "agent", "model", "tools"]
 ```
 
-控制台命令只是调用这个函数。可以从同一个包分别运行：
+在自己的项目目录运行：
 
 ```bash
-uv run python -m minicode --help
-uv run minicode --help
-uv run minicode --read-only -p "查看项目结构并总结"
+uv sync
+uv run my-agent --json
 ```
 
-前面的阶段没有这项控制台声明，所以本章之前的真实实验都使用 Python 入口。
+`uv sync` 安装当前项目并生成命令入口，`uv run` 使用该项目的虚拟环境。如果你给这些模块增加了其他本地导入，也把相应模块加入清单。
 
-## 5. 最后补配置和退出细节
-
-完整 CLI 区分三类配置：模型连接，Agent 的轮数与预算，应用的显示与扩展。用 `uv run minicode --help` 查阅完整参数，不需要一次记住。
-
-- 密钥从指定环境变量读取，不作为命令行明文参数。
-- `--stream` 决定是否请求 SSE；`--json` 决定事件怎样显示。
-- 已存在的会话文件需要 `--resume`，缺失的工具结果记为未知，不重做写操作。
-- `--provider` 与 `--api` 分开；协议选择发生在模型工厂。
-- 成功退出码为 0，任务未完成为 1，配置错误为 2，外层键盘中断为 130。
-
-恢复历史时，应用说明按当前显式配置处理；服务商原始续轮数据只在来源匹配时重用。逐项阅读实现并测试这些条件，不把它们塞回最初的 `main()` 示例。
-
-## 6. 构建并在新环境检查
-
-```bash
-uv build
-uv venv /tmp/minicode-clean
-uv pip install --python /tmp/minicode-clean/bin/python dist/agent_life_from_zero-0.2.0-py3-none-any.whl
-/tmp/minicode-clean/bin/minicode --help
-/tmp/minicode-clean/bin/minicode --demo
-```
-
-这里使用 macOS/Linux 的路径；Windows 对应虚拟环境的 `Scripts` 目录。安装包验证用固定 demo，真实效果继续用前面的 API 任务检查。
-
-## 验收
-
-```bash
-uv run python examples/16_shipping.py --step minimal --offline
-uv run python examples/16_shipping.py --step enhanced --offline
-uv run python -m pytest tests/test_lesson16.py tests/test_app.py tests/test_provider_config.py -q
-uv build
-```
-
-发布前再从原教程仓库运行全部测试与 `scripts/check_tutorial.py`。给 README 写清安装、真实 API 配置、基本任务、权限与恢复方式。先让别人完成一个任务，再介绍扩展参数。
+本章已经实现了参数读取、组件组装、两种显示方式、失败出口和安装入口。仓库的[最终 CLI](../minicode/cli.py)还组装了会话、权限、Skills、MCP 等功能，作为后续扩展参考；它不是本章 `main()` 背后隐藏调用的程序。

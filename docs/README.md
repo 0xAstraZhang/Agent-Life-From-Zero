@@ -1,83 +1,77 @@
-# 教程目录：先做出 Agent，再逐步完善
+# 教程目录：从空目录逐步写出 Agent
 
-你只需要 Python 基础，以及一个支持 Chat Completions 和函数工具的模型账号。第 00 章直接调用真实 API，第 01 章写出工具循环；模型、历史和工具怎样配合，是整套教程的主线。
+教程主线是你自己的 `my-agent` 项目。所有新增函数、类和运行入口都在正文中给出完整定义；导入的本地模块必须是此前已经写过的文件。先让真实模型回答，再一步步增加工具和控制流程。
 
-## 从哪里开始
+## 怎样跟着写
 
-先读[第 00 章](00-setup.md)，安装环境并配置模型。每章按这个顺序学习：
+从[第 00 章](00-setup.md)创建空目录开始。每章按顺序执行：
 
-1. 写出并运行最小原型，观察本章增加的效果。
-2. 沿消息和函数调用解释数据流。
-3. 改变一个条件，看到当前版本的问题。
-4. 加入对应处理，运行增强版本与测试。
+1. 保留前一章已经写好的文件。
+2. 按正文创建或替换本章文件。
+3. 在自己的项目目录运行 `uv run python demo.py`，观察结果。
+4. 完成最小版本后，再写增强步骤并重新运行。
 
-默认示例请求真实模型。`--offline` 使用确定的回复来验证程序，自动检查只运行这种模式。你无需先实现假模型，才能开始与真实模型交互。
+例如第一章的 `from model import open_model` 指向第 00 章亲手创建的 `model.py`。正文会先解释来源，不要求读者导入仓库里的 `lessons.ch00`，也不要求复制未讲过的成品模块。
 
-## 章节与最小成果
+代码块标出的 `file` 是要写入的文件名，`step` 是本章检查点。它们用于标明完整文件，不属于 Python 代码。未标文件名的短片段只用来解释数据，正文会说明它放在哪里。
 
-| 章节 | 先完成什么 | 再增加什么 |
+## 学习路线
+
+| 章节 | 先写出的骨架 | 再增加的内容 |
 | --- | --- | --- |
-| [00 第一次真实对话](00-setup.md) | 发请求，打印真实回答 | 保存历史，继续追问 |
-| [01 最小 Agent Loop](01-agent-loop.md) | 一个工具完成请求、执行和结果回传 | 回复一致性、参数错误回传 |
-| [02 工具注册](02-tools.md) | 注册第二个工具，让模型选择 | 参数校验、失败结果 |
-| [03 模型适配器](03-chat-completions.md) | 从已有请求提取统一接口 | 完整数据类型、错误与用量 |
-| [04 Responses，选修](04-responses.md) | 换协议完成同一个工具任务 | items、原始续轮数据 |
-| [05 Anthropic，选修](05-anthropic.md) | 用内容块完成工具往返 | 多调用合并、协议状态 |
-| [06 编码工具](06-coding-tools.md) | 读取、修改练习文件，运行固定检查 | 通用文件工具、并发修改与输出限制 |
-| [07 权限](07-permissions.md) | 批准或拒绝一次模型提出的操作 | 允许名单、只读策略 |
-| [08 流式输出](08-streaming.md) | 打印真实文本增量 | 完整回复、工具参数与中断 |
-| [09 上下文](09-context.md) | 把项目约定放入模型请求 | 来源、缺失文件与长度 |
-| [10 会话与压缩](10-sessions-compaction.md) | 保存历史，加载后继续对话 | 单独学习摘要，再处理恢复和压缩边界 |
-| [11 Hooks 与规划](11-hooks-planning.md) | 执行后记一条日志；用工具更新计划 | 拦截、改写、计划状态约束 |
-| [12 子 Agent](12-subagents.md) | 独立历史执行调查，结果返回父 Agent | 工厂、共享预算和递归限制 |
-| [13 Skills](13-skills.md) | 先给简介，需要时读取正文 | 目录扫描、格式和路径约束 |
-| [14 MCP](14-mcp.md) | 连接一个 echo 进程，接成普通工具 | 分页、通信异常和进程清理 |
-| [15 评测](15-evals.md) | 用独立验收检查一个真实任务 | 多任务、失败分类和预算 |
-| [16 交付](16-shipping.md) | 写出最小 CLI，运行一个任务 | 交互、扩展开关和打包 |
-| [17 沙箱](17-sandbox.md) | 观察工作区内外写入的区别 | 保护路径、网络、环境与进程 |
-| [18 运行控制](18-runtime.md) | 每次只加一种控制，观察结果 | 分别练习日志、重试、期限等能力 |
+| [00 真实对话](00-setup.md) | 完整 HTTP 请求 | 自己提取客户端，带历史追问 |
+| [01 Agent 循环](01-agent-loop.md) | 单工具请求、执行、结果回传 | 参数错误与回复一致性 |
+| [02 工具注册](02-tools.md) | 名称到本地函数的映射 | 参数校验与错误反馈 |
+| [03 可复用 Agent](03-chat-completions.md) | 把历史放进自己写的类 | 替换执行函数，连续对话 |
+| [04 Responses，选修](04-responses.md) | 直接发送两次协议请求 | 写自己的转换客户端 |
+| [05 Anthropic，选修](05-anthropic.md) | 内容块的工具往返 | 接入已有 Agent |
+| [06 编码工具](06-coding-tools.md) | 读、改、检查固定练习文件 | 路径与编辑条件 |
+| [07 权限](07-permissions.md) | 执行前批准或拒绝 | 只读和允许规则 |
+| [08 流式](08-streaming.md) | 接收并显示文本片段 | 拼好完整工具调用再执行 |
+| [09 上下文](09-context.md) | 读取约定，放进 system | 缺失文件与范围检查 |
+| [10 会话与摘要](10-sessions-compaction.md) | 自己保存、加载历史 | 单独写摘要与失败处理 |
+| [11 Hooks 与规划](11-hooks-planning.md) | 包装执行函数；更新计划 | 回调、计划状态约束 |
+| [12 子 Agent](12-subagents.md) | 工具内部运行独立 Agent | 委派范围和共享额度 |
+| [13 Skills](13-skills.md) | 列简介，再按需读取正文 | 读取范围和格式处理 |
+| [14 MCP](14-mcp.md) | 自己写 echo 服务和客户端桥接 | 协议错误与进程清理 |
+| [15 评测](15-evals.md) | 独立检查真实文件结果 | 汇总成功和失败案例 |
+| [16 CLI](16-shipping.md) | 自己解析任务、组装 Agent | JSON 输出和安装入口 |
+| [17 沙箱](17-sandbox.md) | 观察工作区内外写入区别 | 增加明确的保护规则 |
+| [18 运行控制](18-runtime.md) | 记录一次请求 | 连接重试与共同期限 |
 
-主线可以从 **03 直接进入 06**。第 04、05 章是可选协议扩展，不要求在做第一个编码任务前掌握三个协议。各阶段导出保留已提供的适配器与测试，方便需要时比较；主线实验默认沿用 Chat Completions。
+主线可从 **03 直接进入 06**。04/05 只新增自己的协议模块，后续主线不依赖它们。先完成一种协议的实际任务，再按需扩展。
 
-## 手写与阶段快照
+## 验证正文确实能从零运行
 
-先在仓库根目录导出本章，再进入练习目录：
-
-```bash
-uv run python scripts/check_tutorial.py --chapter 1 --export /tmp/minicode-ch01
-cd /tmp/minicode-ch01
-uv sync
-uv run python examples/01_agent_loop.py --step minimal
-uv run python examples/01_agent_loop.py --step enhanced
-```
-
-先读最小版本对应的函数，再按正文加入下一步。复杂章节把会话/压缩、日志/规划等分成独立检查点，具体 `--step` 名称见本章。每个检查点都有完整源码；解释数据形状的片段会单独标明，不能当成完整程序运行。
-
-[`lessons/stages.json`](../lessons/stages.json) 同时记录本章文件和检查点命令。导出目录只包含截至本章的代码，目标必须为空或尚不存在。早期骨架与小原型保存在 `lessons/`，章末增强版本保存在阶段快照或已引入的模块中。最终 `minicode/` 用来对照完整实现。
-
-## 验收每一步
-
-在练习目录运行本章的离线检查点，再运行累计测试。例如第一章：
+学习时只需自己的代码与模型账号。下面这些命令供维护教程或核对手写成果，在原教程仓库根目录执行：
 
 ```bash
-uv run python examples/01_agent_loop.py --offline --step minimal
-uv run python examples/01_agent_loop.py --offline --step enhanced
-uv run python -m pytest tests -q
+uv sync --locked
+uv run python scripts/check_tutorial.py --reader-only
 ```
 
-回到原教程仓库，可以检查一个阶段或全部阶段：
+检查器把每个检查点的完整文件从正文写入空目录，在隔离进程里运行 `demo.py`。它禁止导入本仓库的 `lessons`、`minicode`、`examples`，并检查实际 HTTP 历史、工具结果和文件变化。离线响应由检查器注入，不写进学生项目，也不改变默认真实 API 入口。
+
+只核对第一章，或导出第一章的最小版本：
 
 ```bash
-uv run python scripts/check_tutorial.py --chapter 1
-uv run python scripts/check_tutorial.py
+uv run python scripts/check_tutorial.py --reader-only --chapter 1
+uv run python scripts/reader_project.py --chapter 1 --step minimal --export /tmp/my-agent-ch01
 ```
 
-检查器逐章导出，在隔离进程中运行每个检查点和累计测试。缺失模块不能回落到已安装的最终包，因此借用未来代码会失败。测试检查真实的工具效果和请求历史；固定回复用来稳定重现控制流，不用来证明模型学会了任务。
+导出目录必须为空或尚不存在。可以把自己的文件与导出文件比较，找出漏写的定义；不需要先导出才能学习。
 
-## 从骨架理解扩展
+## 完成手写后再看参考版本
 
-最初只有三个对象：消息列表、模型请求、Python 工具。需要第二个工具时提取注册表，需要替换模型时提取适配器，需要保存进度时写入历史。
+仓库 `lessons/` 与 `minicode/` 保留较完整的参考版本，`examples/` 是这些版本的运行入口。它们有更多状态、异常和兼容处理，适合在理解骨架后比较。
 
-权限在工具执行前判断；工具结果带着调用 ID 返回历史。流式文字可以先显示，工具执行要等完整回复。会话保存完整记录，摘要是给模型看的较短视图。这些机制随着相应原型一起学习，其余异常和通用化处理在看到具体问题后加入。
+参考阶段仍由 [`lessons/stages.json`](../lessons/stages.json) 记录，并单独验收：
 
-[参考实现](references.md)列出了 Codex、OpenCode 和 pi 的固定源码版本。先完成自己的小实现，再比较它们如何处理同一个问题。
+```bash
+uv run python scripts/check_tutorial.py --reference-only
+uv run python scripts/check_tutorial.py --chapter 3 --export /tmp/minicode-reference-ch03
+```
+
+默认的 `scripts/check_tutorial.py` 会同时检查正文项目、参考阶段和本地链接。两条代码线分别验证，避免参考实现能运行，却掩盖正文缺少定义的问题。
+
+[开源参考资料](references.md)用于完成自己的小实现后作比较。[运行参数手册](18-runtime-reference.md)描述最终参考 CLI，不作为手写课程的前置接口。

@@ -1,90 +1,133 @@
-# 第 00 章：让 Python 真正和模型说一句话
+# 第 00 章：从空目录发出第一次真实请求
 
-[目录](README.md) · 下一章：[最小 Agent Loop](01-agent-loop.md)
+[目录](README.md) · 下一章：[Agent 循环](01-agent-loop.md)
 
-这一章先做一件能看见结果的事：在 Python 中发出问题，打印模型的真实回答。然后再给它发第二句话，观察历史消息如何让对话连起来。
+这一章不需要教程仓库里的任何 Python 文件。我们在自己的空目录里写程序，发送一个真实问题，再把模型回复打印出来。需要 Python 3.12+、[uv](https://docs.astral.sh/uv/getting-started/installation/) 和一个支持 Chat Completions 与函数工具的模型账号。
 
-## 1. 准备环境和模型
+## 1. 建立自己的项目
 
-需要 Python 3.12+、[uv](https://docs.astral.sh/uv/getting-started/installation/)，以及一个支持 **Chat Completions 和函数工具调用**的模型账号。后两章会沿用同一模型；模型 ID 请填写服务商实际提供的值。
-
-在仓库根目录安装依赖：
+在你准备存放练习的位置执行：
 
 ```bash
-uv sync --locked
+mkdir my-agent
+cd my-agent
 ```
 
-在同一个终端设置配置。`BASE_URL` 是 API 根地址，程序会在末尾加 `/chat/completions`：
+新建 `pyproject.toml`，写入：
+
+```toml file=pyproject.toml step=minimal
+[project]
+name = "my-agent"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = ["httpx>=0.28,<1"]
+```
+
+运行 `uv sync` 安装 HTTP 库。后续所有学习命令都在这个 `my-agent` 目录中执行。
+
+在当前终端配置同一服务的模型、API 根地址和密钥：
 
 ```bash
-export MINICODE_API="openai-chat"
+export MINICODE_MODEL="填写支持 Chat Completions 和函数工具的模型 ID"
 export MINICODE_BASE_URL="https://api.openai.com/v1"
-export MINICODE_MODEL="填写你账号可用的模型 ID"
+export MINICODE_API_KEY="填写你的密钥"
 ```
 
-另行通过环境变量设置 `MINICODE_API_KEY`。密钥不写进 Python 文件或仓库；程序不会自动读取 `.env`。真实请求会产生服务商费用。已有完整的 `LLM_MODEL`、`LLM_BASE_URL`、`LLM_API_KEY` 时，也可以继续用这一组；不要同时留下半组 `MINICODE_*` 配置。
+兼容服务填写自己的根地址，不包含 `/chat/completions`。密钥只放环境变量，真实请求会产生服务商费用。程序不自动读取 `.env`。
 
-本章代码是 [lessons/ch00.py](../lessons/ch00.py)，运行入口是 [examples/00_hello.py](../examples/00_hello.py)。想在独立目录手写，可先导出本章：
+## 2. 写完整的第一次请求
 
-```bash
-uv run python scripts/check_tutorial.py --chapter 0 --export /tmp/minicode-ch00
-cd /tmp/minicode-ch00
-uv sync
-```
+新建 `demo.py`，把下面的完整代码写进去：
 
-导出目标须为空。接下来的命令既可在仓库根目录运行，也可在这个练习目录运行。
+```python file=demo.py step=minimal
+import os
+import httpx
 
-## 2. 最小原型：一次请求，一次回答
+model = os.environ["MINICODE_MODEL"]
+base_url = os.environ["MINICODE_BASE_URL"].rstrip("/")
+api_key = os.environ["MINICODE_API_KEY"]
+messages = [{"role": "user", "content": "你好！请用一句话介绍你自己。"}]
 
-```bash
-uv run python examples/00_hello.py --step minimal
-```
-
-你会收到模型生成的一句话。改动提示词后再次运行，回答也会改变；这里没有预先写好的答案。
-
-请求最重要的内容只有两个字段：
-
-```python
-body = {
-    "model": "你选择的模型 ID",
-    "messages": [{"role": "user", "content": "你好！"}],
-}
-```
-
-`model` 决定请求哪个模型；`messages` 记录谁说了什么。通过 HTTP 发出去，再从返回值中取出助手消息：
-
-```python
-response = client.post(base_url + "/chat/completions", json=body)
-response.raise_for_status()
-reply = response.json()["choices"][0]
-print(reply["message"]["content"])
-```
-
-`client` 是带认证头的 `httpx.Client`。完整文件把这几行放进 `ChatModel.complete()`，把环境变量和连接的建立、关闭放进 `open_chat()`。它们不决定模型回答什么。
-
-下面是可以直接复制运行的检查点。`open_chat()` 默认连接刚才配置的真实 API：
-
-```python
-# 可运行检查点：00-minimal
-from lessons.ch00 import open_chat
-
-with open_chat() as model:
-    messages = [{"role": "user", "content": "你好！请用一句话介绍你自己。"}]
-    reply = model.complete(messages)
+with httpx.Client(timeout=60) as client:
+    response = client.post(
+        base_url + "/chat/completions",
+        headers={"Authorization": f"Bearer {api_key}"},
+        json={"model": model, "messages": messages},
+    )
+    response.raise_for_status()
+    reply = response.json()["choices"][0]
     print(reply["message"]["content"])
 ```
 
-到这里先停下来改一次问题，确认你能解释：输入在哪里、HTTP 请求在哪里、回答从哪个字段取出来。
+运行你刚写的文件：
 
-## 3. 增强一步：让模型记住上一句话
+```bash
+uv run python demo.py
+```
 
-模型不会因为前一次 HTTP 请求结束，就自动记住你的对话。下一次请求要带上之前的用户消息和助手回答：
+先改变问题再运行一次。`messages` 是输入，`client.post()` 发出 HTTP 请求，`choices[0].message.content` 是模型生成的回答。此时先把这三处对应起来。
 
-```python
-# 可运行检查点：00-enhanced
-from lessons.ch00 import open_chat
+## 3. 把请求代码提取为自己写的客户端
 
-with open_chat() as model:
+接下来要发送第二个问题。先将重复的请求代码放入一个新文件 `model.py`。下面给出完整定义；下一章的 `from model import open_model` 就是导入你在这里写的文件。
+
+```python file=model.py step=enhanced
+from contextlib import contextmanager
+import os
+import httpx
+
+
+class ChatModel:
+    def __init__(self, model, base_url, api_key, client=None):
+        self.model = model
+        self.base_url = base_url.rstrip("/")
+        self.api_key = api_key
+        self.client = client if client is not None else httpx.Client(timeout=60)
+        self.owns_client = client is None
+
+    def complete(self, messages, tools=()):
+        body = {"model": self.model, "messages": messages}
+        if tools:
+            body["tools"] = list(tools)
+        response = self.client.post(
+            self.base_url + "/chat/completions",
+            headers={"Authorization": f"Bearer {self.api_key}"},
+            json=body,
+        )
+        response.raise_for_status()
+        return response.json()["choices"][0]
+
+    def close(self):
+        if self.owns_client:
+            self.client.close()
+
+
+@contextmanager
+def open_model():
+    prefix = "MINICODE"
+    if not any(os.environ.get(f"MINICODE_{key}") for key in ("MODEL", "BASE_URL", "API_KEY")):
+        prefix = "LLM"
+    model = ChatModel(
+        os.environ[f"{prefix}_MODEL"],
+        os.environ[f"{prefix}_BASE_URL"],
+        os.environ[f"{prefix}_API_KEY"],
+    )
+    try:
+        yield model
+    finally:
+        model.close()
+```
+
+`ChatModel.complete()` 保留刚才的请求过程；`tools` 先留空，下一章传入工具声明。`open_model()` 读取配置，建立客户端，在 `with` 结束时关闭连接。`yield model` 把这个客户端交给 `with ... as model` 使用。
+
+配置优先读取完整的 `MINICODE_*` 组；如果这一组没有设置，才读取已有的 `LLM_MODEL`、`LLM_BASE_URL`、`LLM_API_KEY`。不会用另一组密钥补全半组配置。
+
+现在把 `demo.py` 全部替换为：
+
+```python file=demo.py step=enhanced
+from model import open_model
+
+with open_model() as model:
     messages = [{"role": "user", "content": "我叫小林，请记住我的名字。"}]
     first = model.complete(messages)
     messages.append(first["message"])
@@ -93,33 +136,19 @@ with open_chat() as model:
     print(second["message"]["content"])
 ```
 
-完整入口中的同一实验：
+再次运行 `uv run python demo.py`。第二次请求带上了 `user → assistant → user` 三条消息，所以模型能看到你之前说的名字。
 
-```bash
-uv run python examples/00_hello.py --step enhanced
+## 4. 验收与下一步
+
+检查你自己的目录应有：
+
+```text
+my-agent/
+  pyproject.toml
+  model.py
+  demo.py
 ```
 
-第二次请求的顺序是 `user → assistant → user`。下一章只会在这份历史里再增加“工具调用”和“工具结果”。
+关闭终端再运行会缺少环境变量，需在新终端重新设置。401/403 先核对密钥，404 先核对地址、模型与协议。运行成功后，试着不把第一条用户消息加入第二次请求，观察回答变化。
 
-## 4. 运行成功以后，再看失败和检查
-
-| 现象 | 从哪里检查 |
-| --- | --- |
-| 缺少环境变量 | 同一组 `MODEL`、`BASE_URL`、`API_KEY` 是否齐全 |
-| HTTP 401/403 | 密钥是否有效、账号是否有访问权限 |
-| HTTP 404 或模型不存在 | 根地址、模型 ID、协议是否匹配 |
-| `uv` 不存在 | 按 uv 安装说明安装后重新打开终端 |
-
-自动检查使用明确的离线开关；它是测试手段，不是学习前置步骤：
-
-```bash
-uv run python examples/00_hello.py --offline --step minimal
-uv run python examples/00_hello.py --offline --step enhanced
-uv run python -m pytest tests/test_ch00.py -q
-```
-
-测试会检查实际发出的请求体，以及第二次请求是否包含完整历史。离线回复固定，不能用来评价模型能力。
-
-练习：去掉第二次请求中的第一条用户消息，再问名字；比较两次回答。你已经亲手控制了模型能看到的上下文。
-
-协议字段可查 [Chat Completions 官方接口](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create)。下一章：[让模型提出动作，让 Python 执行动作](01-agent-loop.md)。
+正文已经包含全部需要手写的内容。教程仓库的阶段导出与离线检查只是维护工具，见[目录中的验收说明](README.md#验证正文确实能从零运行)。协议字段见 [Chat Completions 官方接口](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create)。

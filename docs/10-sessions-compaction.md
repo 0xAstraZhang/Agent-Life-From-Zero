@@ -1,157 +1,278 @@
-# 第 10 章：先保存对话，再为长对话制作摘要
+# 第 10 章：先保存对话，再为旧对话制作摘要
 
 [上一章：上下文](09-context.md) · [目录](README.md) · [下一章：Hooks 与规划](11-hooks-planning.md)
 
-这一章做两个独立实验。第一个让新建的 Agent 继续之前的对话；第二个把旧对话变成较短的请求。先分别跑通，再组合。
+继续使用自己写的 `model.py` 和 `agent.py`。本章分开做两个实验：会话保存回答“退出后怎样继续”，摘要回答“下一次请求怎样更短”。先分别跑通，不同时引入。
 
-## 1. 最小会话：保存 → 读取 → 继续
+## 1. 最小会话：保存、加载、继续
 
-`Agent.history` 已经有完整消息。保存会话就是把这些消息写入文件，恢复就是读回它们，交给新的 Agent。
+我们的历史已经是普通字典列表，可以直接写成 JSON。新建 `session.py`：
 
-先把数据类转成普通字典，再写成 JSON。以下是 [lessons/ch10.py](../lessons/ch10.py) 中的完整保存函数：
+```python file=session.py step=minimal
+import json
 
-```python
+
 def save_history(path, history):
-    records = [asdict(message) for message in history]
-    path.write_text(json.dumps(records, ensure_ascii=False), encoding="utf-8")
-```
+    path.write_text(json.dumps(history, ensure_ascii=False), encoding="utf-8")
 
-文件读回后，把每个内容块重建为对应的数据类。下面处理正常记录；损坏文件的完整校验在增强步骤中加入：
 
-```python
 def load_history(path):
-    records = json.loads(path.read_text(encoding="utf-8"))
-    history = []
-    for record in records:
-        parts = []
-        for saved in record["content"]:
-            part = dict(saved)
-            kind = part.pop("type")
-            if kind == "text":
-                parts.append(Text(**part))
-            elif kind == "tool_call":
-                parts.append(ToolCall(**part))
-            elif kind == "tool_result":
-                parts.append(ToolResult(**part))
-            else:
-                raise ValueError(f"未知内容块：{kind}")
-        history.append(Message(record["role"], parts, record.get("provider_data", {})))
-    return history
+    return json.loads(path.read_text(encoding="utf-8"))
 ```
 
-两个函数使用 `json`、`asdict`，以及前章的 `Message`、`Text`、`ToolCall`、`ToolResult`，完整导入在原型文件开头。调用和结果都保留 ID，`provider_data` 也原样保存。
 
-恢复入口只需给 Agent 构造函数增加 `history=None`，并将历史初始化改为：
+第 03 章的 Agent 已有 `history` 参数。保存以后创建新的 Agent，把读回的消息交给它即可。把下面完整程序写入 `demo.py`：
 
-```python
-self.history = list(history) if history is not None else [Message.text("system", system_prompt)]
+```python file=demo.py step=minimal
+from copy import deepcopy
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from model import open_model
+from agent import Agent
+from session import save_history, load_history
+
+
+with TemporaryDirectory() as directory, open_model() as model:
+    path = Path(directory) / "session.json"
+    first = Agent(model, {})
+    print(first.run("记住：项目代号是星河，测试命令是 python -m pytest。"))
+    saved = deepcopy(first.history)
+    save_history(path, first.history)
+    del first
+
+    history = load_history(path)
+    if history != saved:
+        raise RuntimeError("读回的历史与保存内容不同")
+    print("恢复历史：", len(history), "条")
+    resumed = Agent(model, {}, history=history)
+    print(resumed.run("项目代号和测试命令分别是什么？"))
+    if resumed.history[:len(saved)] != saved:
+        raise RuntimeError("继续对话时丢失了已有历史")
 ```
 
-完整阶段版本见 [agent.py](../lessons/stages/10/minicode/agent.py)。随后就能写出下面的顺序：
-
-```python
-save_history(path, agent.history)
-history = load_history(path)
-resumed = Agent(model, runner, history=history)
-for event in resumed.run("项目代号和测试命令分别是什么？"):
-    print(event)
-```
-
-`minimal` 示例先告诉模型项目代号和测试命令，保存到磁盘，删除第一个 Agent，再用读回的历史继续。新问题没有重述答案；观察第二次请求能否沿用已保存的信息。
-
-## 运行本章检查点
-
-沿用第 00 章配置的 `MINICODE_MODEL`、`MINICODE_BASE_URL`、`MINICODE_API_KEY`。默认使用真实 API；回答措辞不固定，观察消息与工具的实际变化。需要独立工作目录时，在教程仓库根目录导出：
 
 ```bash
-uv run python scripts/check_tutorial.py --chapter 10 --export /tmp/minicode-ch10
-cd /tmp/minicode-ch10
-uv sync
+uv run python demo.py
 ```
 
-在仓库根目录或导出目录运行：
+程序先与真实模型对话，把历史写进磁盘，删除第一个 Agent，再从文件恢复。第二个问题没有重述答案；观察新 Agent 如何使用旧消息。
+
+保存的是整个消息字典，所以工具调用、结果 ID 和适配器保留的字段都跟着保存。这里没有另造消息格式。
+
+## 2. 会话增强：写完整再替换，读回时检查格式
+
+将 `session.py` 替换为下面的完整版本。这个练习使用单个写入者；先写临时文件，写完后再替换已有会话：
+
+```python file=session.py step=enhanced
+import json
+
+
+def save_history(path, history):
+    record = {"version": 1, "messages": history}
+    temporary = path.with_name(path.name + ".tmp")
+    try:
+        temporary.write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def load_history(path):
+    record = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(record, dict) or record.get("version") != 1:
+        raise ValueError("不支持的会话格式")
+    messages = record.get("messages")
+    if not isinstance(messages, list) or not messages:
+        raise ValueError("会话必须包含消息")
+    for message in messages:
+        if not isinstance(message, dict) or message.get("role") not in {"system", "user", "assistant", "tool"}:
+            raise ValueError("会话中有不合法的消息")
+    return messages
+```
+
+
+增强检查点的完整 `demo.py`：
+
+```python file=demo.py step=enhanced
+from copy import deepcopy
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from model import open_model
+from agent import Agent
+from session import save_history, load_history
+
+
+with TemporaryDirectory() as directory, open_model() as model:
+    path = Path(directory) / "session.json"
+    first = Agent(model, {})
+    print(first.run("记住：项目代号是星河，测试命令是 python -m pytest。"))
+    saved = deepcopy(first.history)
+    save_history(path, first.history)
+    del first
+
+    history = load_history(path)
+    if history != saved:
+        raise RuntimeError("读回的历史与保存内容不同")
+    print("恢复历史：", len(history), "条")
+    resumed = Agent(model, {}, history=history)
+    print(resumed.run("项目代号和测试命令分别是什么？"))
+    if resumed.history[:len(saved)] != saved:
+        raise RuntimeError("继续对话时丢失了已有历史")
+
+    save_history(path, resumed.history)
+    print("续轮后已保存：", len(load_history(path)), "条")
+    path.write_text('{"version": 99, "messages": []}', encoding="utf-8")
+    try:
+        load_history(path)
+    except ValueError as error:
+        print("损坏会话已拒绝：", error)
+```
+
 
 ```bash
-uv run python examples/10_sessions.py --step minimal
-uv run python examples/10_sessions.py --step enhanced
-uv run python examples/10_sessions.py --step compact
-uv run python examples/10_sessions.py --step compact-enhanced
+uv run python demo.py
 ```
 
-给同一命令加 `--offline` 可运行固定回复的回归检查。它用来验证程序控制流；学习时先观察真实请求。协议可用 `--api` 选择。
+先验收正常恢复，再看到不支持的版本被拒绝。真实应用还需要检查调用与结果是否配对。若工具已执行而结果尚未保存，恢复时不能自动重做写操作；这是中断恢复的下一步课题。
+
+## 3. 独立的最小摘要实验
+
+现在不读写会话文件。新建 `compact.py`，把旧的完整用户轮交给模型摘要，保留 system 和最新用户轮：
+
+```python file=compact.py step=compact
+import json
 
 
-## 2. 会话增强：处理保存和恢复中途失败
-
-正常保存恢复已经可用，再替换为 [SessionStore](../minicode/session.py)：
-
-```python
-store = SessionStore(".minicode/session.jsonl")
-store.save(agent.history)
-resumed = Agent(model, runner, history=store.load())
-for event in run_session(resumed, "继续任务", store):
-    print(event)
-```
-
-`enhanced` 只演示保存恢复，不启用压缩。增强实现增加 JSONL 格式版本、内容块校验、临时文件写完再替换，以及事件发生后的自动保存。序列化完整定义见 [本章 types.py](../lessons/stages/10/minicode/types.py)。
-
-还有一种失败需要单独理解：工具已经写入文件，但进程在保存结果前退出。恢复时只知道“有调用、没结果”，不能自动重做。`repair_pending()` 补一条“结果未知”的工具结果，让模型先检查现状。
-
-## 3. 最小压缩：为下一次请求制作一个视图
-
-现在暂时放下磁盘文件。长历史需要缩短时，取出旧的完整用户轮，让模型写摘要，再拼回 system 和最新用户轮：
-
-```text
-完整历史：system | 旧用户轮及其工具往返 | 最新用户轮
-模型请求：system | 旧轮摘要             | 最新用户轮
-```
-
-以下是完整的压缩原型；它在新用户轮开始时调用，不修改传入的 `history`：
-
-```python
 def compact_history(model, history):
-    """在新用户轮开始时调用：保留 system 和最新用户轮，摘要此前完整轮次。"""
-    latest_user = max(index for index, message in enumerate(history) if message.role == "user")
-    systems = [message for message in history[:latest_user] if message.role == "system"]
-    old_turns = [message for message in history[:latest_user] if message.role != "system"]
-    transcript = json.dumps([asdict(message) for message in old_turns], ensure_ascii=False)
-    reply = model.complete([
-        Message.text("system", "把此前对话写成简短交接摘要。保留目标、约束、已知结果和未完成事项。"),
-        Message.text("user", transcript),
-    ], [])
-    summary = message_text(reply.message).strip()
-    if reply.stop_reason != "stop" or not summary:
-        raise RuntimeError("摘要没有完成")
-    return systems + [Message.text("user", "此前任务摘要：\n" + summary)] + history[latest_user:]
+    latest_user = max(i for i, message in enumerate(history) if message["role"] == "user")
+    systems = [m for m in history[:latest_user] if m["role"] == "system"]
+    old_turns = [m for m in history[:latest_user] if m["role"] != "system"]
+    summary_reply = model.complete([
+        {"role": "system", "content": "写一份简短交接摘要，保留目标、约束、结果和未完成事项。"},
+        {"role": "user", "content": json.dumps(old_turns, ensure_ascii=False)},
+    ])
+    summary = summary_reply["message"].get("content", "")
+    if summary_reply["finish_reason"] != "stop" or not summary:
+        raise ValueError("摘要没有完成")
+    summary_message = {"role": "user", "content": "此前任务摘要：\n" + summary}
+    return systems + [summary_message] + history[latest_user:]
 ```
 
-`compact` 检查点先完成一轮真实对话，然后独立发起摘要请求，打印拼好的请求视图，最后用这个视图回答新问题。它不读写会话文件。观察摘要保留了什么，也比较压缩前后的文本；短对话不一定会变短。
 
-这里按用户轮切分，而不是取最后若干条消息，因此旧轮的工具调用和结果一起进入摘要。最新问题保持原文，system 保持原有角色。
+按用户轮切分，是为了让调用与对应结果一起进入摘要，避免留下孤立的工具结果。最新问题保持原文，完整历史也不被覆盖。
 
-## 4. 压缩增强：何时摘要，失败怎么办
+将 `demo.py` 替换为以下完整程序：
 
-理解请求视图后，再引入 [CompactingModel](../lessons/stages/10/minicode/compact.py)：
+```python file=demo.py step=compact
+from copy import deepcopy
 
-```python
-model = CompactingModel(raw_model, threshold_chars=48_000, keep_turns=2)
-agent = Agent(model, runner, history=history)
+from model import open_model
+from agent import Agent
+from compact import compact_history
+
+
+with open_model() as model:
+    first = Agent(model, {})
+    print(first.run("记住：项目代号是星河，测试命令是 python -m pytest。"))
+    history = deepcopy(first.history)
+    history.append({"role": "user", "content": "项目代号和测试命令分别是什么？"})
+    original = deepcopy(history)
+    request = compact_history(model, history)
+    print("摘要请求视图：", request)
+    reply = model.complete(request)
+    if reply["finish_reason"] != "stop":
+        raise RuntimeError("模型没有完成回答")
+    print(reply["message"]["content"])
+    if history != original or request[-1] != original[-1]:
+        raise RuntimeError("压缩改动了原历史或最新问题")
+    print("完整历史：", len(history), "条；请求视图：", len(request), "条")
 ```
 
-`compact-enhanced` 用很低的阈值演示自动触发。增强层负责字符阈值、保留近期轮次、摘要缓存、失败回退和摘要用量统计。它包装模型，不覆盖完整会话。
-
-字符阈值用于估计请求大小。单轮工具输出很长时，还需要限制或分段读取工具输出；第 18 章再处理长任务运行控制。
-
-## 检查与练习
 
 ```bash
-uv run python examples/10_sessions.py --step minimal --offline
-uv run python examples/10_sessions.py --step enhanced --offline
-uv run python examples/10_sessions.py --step compact --offline
-uv run python examples/10_sessions.py --step compact-enhanced --offline
-uv run python -m pytest tests/test_lesson_10.py tests/test_session.py tests/test_compact.py -q
+uv run python demo.py
 ```
 
-先验证保存后的工具 ID 和原始续轮数据能读回，摘要后的最新问题和完整历史不变，再检查损坏文件、中断记录和摘要失败回退。
+这次有三次真实请求：记住项目约定、生成摘要、用摘要回答问题。观察打印的请求视图。短对话不一定因摘要变短；这里先看信息怎样流动。
 
-练习：在第一次对话中加入另一个项目约定，分别经过磁盘恢复和摘要后询问它，比较两条路径保留的信息。会话含有实际对话和工具结果，保存目录放进 `.gitignore`。
+## 4. 摘要增强：达到阈值时才制作视图
+
+理解两份历史后，将 `compact.py` 替换为完整增强版本：
+
+```python file=compact.py step=compact-enhanced
+import json
+
+
+def compact_history(model, history):
+    latest_user = max(i for i, message in enumerate(history) if message["role"] == "user")
+    systems = [m for m in history[:latest_user] if m["role"] == "system"]
+    old_turns = [m for m in history[:latest_user] if m["role"] != "system"]
+    summary_reply = model.complete([
+        {"role": "system", "content": "写一份简短交接摘要，保留目标、约束、结果和未完成事项。"},
+        {"role": "user", "content": json.dumps(old_turns, ensure_ascii=False)},
+    ])
+    summary = summary_reply["message"].get("content", "")
+    if summary_reply["finish_reason"] != "stop" or not summary:
+        raise ValueError("摘要没有完成")
+    summary_message = {"role": "user", "content": "此前任务摘要：\n" + summary}
+    return systems + [summary_message] + history[latest_user:]
+
+
+class CompactingModel:
+    def __init__(self, inner, threshold_chars=48_000):
+        self.inner = inner
+        self.threshold_chars = threshold_chars
+        self.compactions = 0
+        self.last_error = ""
+
+    def complete(self, messages, tools=()):
+        view = messages
+        size = len(json.dumps(messages, ensure_ascii=False))
+        user_count = sum(message["role"] == "user" for message in messages)
+        if size > self.threshold_chars and user_count >= 2:
+            try:
+                view = compact_history(self.inner, messages)
+                self.compactions += 1
+            except ValueError as error:
+                self.last_error = str(error)
+        return self.inner.complete(view, tools)
+```
+
+
+包装器在请求之前选择视图，再交给原模型。`ValueError` 表示摘要内容没通过检查，此时仍发送完整历史；网络异常继续交给调用方处理。字符阈值只是近似值。
+
+对应的完整 `demo.py`：
+
+```python file=demo.py step=compact-enhanced
+from copy import deepcopy
+
+from model import open_model
+from agent import Agent
+from compact import CompactingModel
+
+
+with open_model() as raw_model:
+    first = Agent(raw_model, {})
+    print(first.run("记住：项目代号是星河，测试命令是 python -m pytest。"))
+    saved = deepcopy(first.history)
+    model = CompactingModel(raw_model, threshold_chars=1)
+    resumed = Agent(model, {}, history=first.history)
+    print(resumed.run("项目代号和测试命令分别是什么？"))
+    if model.compactions != 1 or resumed.history[:len(saved)] != saved:
+        raise RuntimeError("摘要未发生，或完整历史被改动")
+    print("摘要次数：", model.compactions)
+    print("完整历史仍保留：", len(resumed.history), "条")
+```
+
+
+```bash
+uv run python demo.py
+```
+
+本次将阈值故意设为 1，方便观察一次摘要。实际使用时提高阈值。缓存、单个长任务内的压缩和 token 估算留到第 18 章。
+
+四个检查点都通过同一条 `uv run python demo.py` 命令运行；每次先保存当前版本，再按本节完整代码替换文件。练习：增加一项项目约定，比较磁盘恢复和摘要以后各保留了什么。
+
+章末对照：[完整会话实现](../minicode/session.py)、[本章参考压缩实现](../lessons/stages/10/minicode/compact.py)。主线程序只导入本章及之前自己写的本地模块。

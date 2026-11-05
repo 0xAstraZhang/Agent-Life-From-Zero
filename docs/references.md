@@ -8,7 +8,7 @@
 
 旧仓库 `badlogic/pi-mono` 已重定向到 `earendil-works/pi`。本教程参考提交 `676af1d777ef6f04b6bc8daf4cf3b9b1799cff4d`。
 
-- [统一消息、工具、上下文与事件](https://github.com/earendil-works/pi/blob/676af1d777ef6f04b6bc8daf4cf3b9b1799cff4d/packages/ai/src/types.ts)：对应第 03 章从字典骨架提取的内部类型。
+- [统一消息、工具、上下文与事件](https://github.com/earendil-works/pi/blob/676af1d777ef6f04b6bc8daf4cf3b9b1799cff4d/packages/ai/src/types.ts)：完成第 03 章的字典骨架后，可以比较它如何进一步定义统一类型。
 - [Agent 类型与转换边界](https://github.com/earendil-works/pi/blob/676af1d777ef6f04b6bc8daf4cf3b9b1799cff4d/packages/agent/src/types.ts)：观察模型可见工具与可执行工具怎样关联。
 - [Agent Loop](https://github.com/earendil-works/pi/blob/676af1d777ef6f04b6bc8daf4cf3b9b1799cff4d/packages/agent/src/agent-loop.ts)：观察模型输出、执行和结果回传的先后关系。
 - [Chat Completions](https://github.com/earendil-works/pi/blob/676af1d777ef6f04b6bc8daf4cf3b9b1799cff4d/packages/ai/src/api/openai-completions.ts)、[Responses 转换](https://github.com/earendil-works/pi/blob/676af1d777ef6f04b6bc8daf4cf3b9b1799cff4d/packages/ai/src/api/openai-responses-shared.ts)、[Anthropic Messages](https://github.com/earendil-works/pi/blob/676af1d777ef6f04b6bc8daf4cf3b9b1799cff4d/packages/ai/src/api/anthropic-messages.ts)：对应第 03–05、08 章。

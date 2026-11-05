@@ -12,7 +12,7 @@ uv run python examples/18_runtime.py --step enhanced --offline
 uv run python -m pytest tests -q
 ```
 
-这里集中记录完整实现的参数和限制。学习时先按第 18 章逐项完成检查点，再按需要查询。第 00–17 章继续使用对应阶段的快照。
+这里记录的是教程仓库 minicode 的最终参考程序，不是读者在 my-agent 中刚刚手写的成果。第 18 章的手写版只实现计时、一次连接重试和共同期限检查。以下 CLI、压缩、后台进程与计费功能需要另外实现；这些命令在原教程仓库运行。
 
 ## 从“能运行”到“能解释一次运行”
 

@@ -1,130 +1,197 @@
-# 第 12 章：把一次独立调查交给子 Agent
+# 第 12 章：把一段独立调查交给子 Agent
 
 [上一章：Hooks 与规划](11-hooks-planning.md) · [目录](README.md) · [下一章：Skills](13-skills.md)
 
-主 Agent 想知道项目怎样运行测试。我们给它一个 `Delegate` 工具；工具里面启动另一个 Agent，让它读取项目记录，再把结论交回来。先完成这次具体调查，再提取工厂和共享预算。
+主 Agent 需要知道项目怎样测试。给它一个 Delegate 工具，让工具函数里创建另一个 Agent，读完项目记录后把答案返回。先写这条最短路径，再加入工厂和共同预算。
 
-## 1. 先看清父子之间传递什么
+继续使用自己在第 03 章写的 `agent.py`，API 客户端也沿用自己的 `model.py`。
+
+## 1. 在工具函数里运行另一个 Agent
+
+新建 `delegate.py`，写入完整定义：
+
+```python file=delegate.py step=minimal
+from agent import Agent
+
+
+def delegate_tool(child_model, child_tools):
+    def investigate(task):
+        child = Agent(child_model, child_tools,
+                      system="你负责独立调查。先读取项目记录，再给出结论和证据。", max_turns=4)
+        return child.run(task)
+
+    return {
+        "spec": {"type": "function", "function": {
+            "name": "Delegate", "description": "委派一个独立的项目调查。",
+            "parameters": {"type": "object", "properties": {"task": {"type": "string"}},
+                           "required": ["task"], "additionalProperties": False},
+        }},
+        "execute": investigate, "read_only": True,
+    }
+```
+
+
+每次执行 investigate 都创建一个新 Agent，所以子任务从新的 system 和 task 开始。子 Agent 的最终文本就是这个工具的返回值；父循环继续按普通工具结果记录它。
 
 ```text
-父 Agent → Delegate(task)
-              ↓
-          子 Agent：新的 history
-              ↓
-          ReadNote → project.txt 的内容
-              ↓
-          子 Agent 的最终回答
-              ↓
-父 Agent ← ToolResult(summary)
+父 Agent → Delegate(task) → 子 Agent 的独立 history
+                           → 读取项目记录
+父 Agent ← 工具结果       ← 子 Agent 的最终回答
 ```
 
-主循环无需增加消息类型。子 Agent 只是普通工具内部的一段程序；对父 Agent 来说，调用和结果仍然是一对 `ToolCall`、`ToolResult`。
+## 2. 先完成一次真正的读取
 
-## 2. 最小委派工具
+把下面完整程序写入 `demo.py`。它创建一份临时项目记录，子 Agent 只获得读取这份记录的工具，父 Agent 只获得 Delegate：
 
-先准备一个只会读固定 `project.txt` 的工具，把它交给子执行器。父执行器只有 `Delegate`，子执行器只有 `ReadNote`。这样第一次实验就能看清各自的工具和历史。
+```python file=demo.py step=minimal
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
-下面是 [lessons/ch12.py](../lessons/ch12.py) 中的完整委派函数：
+from model import open_model
+from agent import Agent
+from delegate import delegate_tool
 
-```python
-def delegate_tool(model, runner):
-    def execute(args, context):
-        child = Agent(model, runner, "先读取项目记录，再给出结论和证据。", max_turns=4)
-        final = None
-        for event in child.run(args["task"]):
-            if event["type"] == "result":
-                final = event
-        if final is None:
-            return ToolResult("", "子 Agent 没有返回终止结果", True)
-        return ToolResult("", final["text"], final["status"] != "success")
 
-    spec = ToolSpec("Delegate", "委派一个读取项目记录的独立调查。", {
-        "type": "object", "properties": {"task": {"type": "string"}},
-        "required": ["task"], "additionalProperties": False,
-    })
-    return Tool(spec, execute, read_only=True)
+with TemporaryDirectory() as directory:
+    path = Path(directory) / "project.txt"
+    path.write_text("项目：星河\n测试命令：python -m pytest\n", encoding="utf-8")
+    reads = []
+
+    def read_note():
+        text = path.read_text(encoding="utf-8")
+        reads.append(text)
+        print("子 Agent 实际读取：", text.strip())
+        return text
+
+    child_tools = {"ReadNote": {
+        "spec": {"type": "function", "function": {
+            "name": "ReadNote", "description": "读取 project.txt 的项目记录。",
+            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+        }},
+        "execute": read_note, "read_only": True,
+    }}
+    with open_model() as model:
+        tools = {"Delegate": delegate_tool(model, child_tools)}
+        parent = Agent(model, tools)
+        print(parent.run("必须用 Delegate 调查测试命令。委派时要求子 Agent 调用 ReadNote，并返回原文中的命令。"))
+        returned = [m["content"] for m in parent.history if m["role"] == "tool"]
+        if not reads or not any("python -m pytest" in text for text in returned):
+            raise RuntimeError("子 Agent 没有完成读取和结果回传")
+        print("子 Agent 读取次数：", len(reads))
 ```
 
-函数需要的 `Agent`、`Tool`、`ToolSpec`、`ToolResult` 已在前章出现。`execute()` 每次创建一个新的 Agent，所以它从 system 和本次 task 开始。循环取出子 Agent 的最终结果，再把文本交给父 Agent。
-
-子任务未成功结束时返回错误结果；父 Agent 可以据此决定下一步。调用 ID 仍由外层 `ToolRunner` 填回，不需要子 Agent 猜测父调用的 ID。
-
-## 3. 运行一次真实调查
-
-沿用第 00 章的模型环境变量。可在教程仓库根目录先导出独立阶段：
 
 ```bash
-uv run python scripts/check_tutorial.py --chapter 12 --export /tmp/minicode-ch12
-cd /tmp/minicode-ch12
-uv sync
+uv run python demo.py
 ```
 
-在仓库根目录或导出目录运行：
+默认都调用真实 API。顺序是父请求委派、子请求读取、子解释结果、父汇总。父子可以使用同一个客户端，决定上下文隔离的是各自的消息列表。
+
+修改 `project.txt` 的内容生成语句，再运行，观察返回的证据随文件变化。委派任务必须写清目标、需要读取的材料和希望得到的结果；不能只说“继续刚才那个问题”。
+
+## 3. 跑通后再提取工厂和共同预算
+
+需要按任务选择不同模型或工具集合时，再将固定对象换成工厂函数。将 `delegate.py` 替换为以下完整版本：
+
+```python file=delegate.py step=enhanced
+from agent import Agent
+
+
+class RequestBudget:
+    def __init__(self, limit):
+        self.limit = limit
+        self.used = 0
+
+    def take(self):
+        if self.used >= self.limit:
+            raise RuntimeError("父子共享请求预算已用完")
+        self.used += 1
+
+
+class BudgetModel:
+    def __init__(self, inner, budget):
+        self.inner, self.budget = inner, budget
+
+    def complete(self, messages, tools=()):
+        self.budget.take()
+        return self.inner.complete(messages, tools)
+
+
+def delegate_tool(model_factory, tools_factory, budget):
+    def investigate(task):
+        tools = {name: tool for name, tool in tools_factory().items()
+                 if tool.get("read_only", False) and name != "Delegate"}
+        model = BudgetModel(model_factory(), budget)
+        child = Agent(model, tools,
+                      system="你负责独立的只读调查。先读取项目记录，再给出结论和证据。", max_turns=4)
+        return child.run(task)
+
+    return {
+        "spec": {"type": "function", "function": {
+            "name": "Delegate", "description": "委派独立的只读调查，不允许再次委派。",
+            "parameters": {"type": "object", "properties": {"task": {"type": "string"}},
+                           "required": ["task"], "additionalProperties": False},
+        }},
+        "execute": investigate, "read_only": True,
+    }
+```
+
+
+现在每次委派都从工厂取得依赖，过滤成只读工具，并排除 Delegate，避免嵌套。父模型和子模型引用同一个预算对象，所以每一次真实请求都计入总数。本章串行运行，不需要先引入线程锁或并发调度。
+
+## 4. 运行增强检查点
+
+把 `demo.py` 替换为完整增强版：
+
+```python file=demo.py step=enhanced
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from model import open_model
+from agent import Agent
+from delegate import delegate_tool, RequestBudget, BudgetModel
+
+
+with TemporaryDirectory() as directory:
+    path = Path(directory) / "project.txt"
+    path.write_text("项目：星河\n测试命令：python -m pytest\n", encoding="utf-8")
+    reads = []
+
+    def read_note():
+        text = path.read_text(encoding="utf-8")
+        reads.append(text)
+        print("子 Agent 实际读取：", text.strip())
+        return text
+
+    child_tools = {"ReadNote": {
+        "spec": {"type": "function", "function": {
+            "name": "ReadNote", "description": "读取 project.txt 的项目记录。",
+            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+        }},
+        "execute": read_note, "read_only": True,
+    }}
+    with open_model() as model:
+        budget = RequestBudget(8)
+        tools = {"Delegate": delegate_tool(lambda: model, lambda: child_tools, budget)}
+        parent = Agent(BudgetModel(model, budget), tools)
+        print(parent.run("必须用 Delegate 调查测试命令。委派时要求子 Agent 调用 ReadNote，并返回原文中的命令。"))
+        returned = [m["content"] for m in parent.history if m["role"] == "tool"]
+        if not reads or not any("python -m pytest" in text for text in returned):
+            raise RuntimeError("子 Agent 没有完成读取和结果回传")
+        print("子 Agent 读取次数：", len(reads))
+
+        print("父子合计请求：", budget.used)
+```
+
 
 ```bash
-uv run python examples/12_subagents.py --step minimal
+uv run python demo.py
 ```
 
-[示例](../examples/12_subagents.py) 创建以下真实文件，再使用真实 API 运行父子两个 Agent：
+这次额外打印父子请求总数。完成一次读文件往返通常是四次请求，真实模型也可能需要更多轮；观察计数，不依赖固定措辞。
 
-```text
-项目名称：星河
-测试命令：python -m pytest
-```
+子任务的工具集合先经过应用筛选，仍沿用第 02 章按名称分发和参数校验的执行器。把这套委派接回更大的应用时，工具工厂继续复用已有权限包装；不要因新增子 Agent 就直接授权写操作。
 
-观察顺序：父 Agent 提出委派 → 子 Agent 实际读取 `project.txt` → 父 Agent 收到调查结果 → 父 Agent 回答。回答措辞可以变化，证据应来自文件。
+练习：再增加一个只读记录工具，让子 Agent 比较两份记录。然后降低共享预算，观察父子任意一方用完额度后怎样终止。请求次数是运行上限，不等于费用；token 和计价在后面学习。
 
-修改文件里的测试命令，再运行一次。子 Agent 的初始历史不包含父历史，因此委派任务应写清“读什么、调查什么、返回什么”；不能只说“继续那个问题”。
-
-## 4. 再把固定依赖换成工厂
-
-最小实现传入现成的模型和执行器。需要为不同子任务创建依赖时，再使用 [subagent_tool()](../lessons/stages/12/minicode/subagents.py)：
-
-```python
-delegate = subagent_tool(
-    model_factory=lambda: child_model,
-    runner_factory=lambda context: child_runner,
-    max_turns=4,
-)
-```
-
-工厂使不同调查可以选择不同模型、工作区或工具集合。增强实现继续限制子执行器只读，并排除 `Delegate` 自己，防止递归委派。
-
-这时再考虑审批对象与 hooks：子执行器复用工作区和审批配置；若增加可改写调用的 hook，让改写后的调用仍经过只读 `PermissionRunner`。只读不等于适合并行，本章保持串行执行。
-
-## 5. 再让父子共享一个预算
-
-先看到完整往返，再限制总请求次数：
-
-```python
-budget = RequestBudget(8)
-parent_model = BudgetModel(raw_parent_model, budget)
-delegate = subagent_tool(
-    lambda: child_model,
-    lambda context: child_runner,
-    max_turns=4,
-    budget=budget,
-)
-```
-
-每次调用模型前从同一个 `budget` 领取一次额度，父子请求加在一起。`enhanced` 运行工厂和预算版本：
-
-```bash
-uv run python examples/12_subagents.py --step enhanced
-```
-
-离线检查点固定经历四次请求：父委派、子读文件、子解释、父汇总。真实模型可能需要不同的轮数，所以检查实际记录，不断言固定轮数。请求预算也不等于金额预算，第 15 章再处理 token 与费用指标。
-
-增强实现还限制摘要长度，保留失败状态。父 Agent 收到的是子任务的结论，不会自动把所有子历史复制回来。
-
-## 检查与练习
-
-```bash
-uv run python examples/12_subagents.py --step minimal --offline
-uv run python examples/12_subagents.py --step enhanced --offline
-uv run python -m pytest tests/test_lesson_12.py tests/test_subagents.py -q
-```
-
-先检查子 Agent 确实读过文件、父 Agent 收到的是工具结果，再验证独立历史、禁止写操作、禁止嵌套和共享预算。
-
-练习：再给子 Agent 一个固定的配置文件读取工具，让它比较两个文件。两个调查能独立形成结论时适合委派；需要交替修改同一状态时，先留在一个 Agent 中完成。
+章末对照：[仓库子 Agent 完整实现](../lessons/stages/12/minicode/subagents.py)。本章使用的 RequestBudget、BudgetModel 和委派工具都已在正文手写。
