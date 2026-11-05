@@ -74,3 +74,17 @@ def test_later_stages_preserve_prior_tests_and_shipping_metadata(tmp_path):
     assert 'name = "agent-life-from-zero"' in project
     assert 'version = "0.2.0"' in project
     assert 'minicode = "minicode.cli:main"' in project
+
+
+def test_sandbox_arrives_only_in_chapter_17(tmp_path):
+    files16, files17 = stage_files(16), stage_files(17)
+    assert "minicode/sandbox.py" not in files16 and "minicode/sandbox.py" in files17
+    assert {p for p in files16 if p.startswith("tests/")} <= set(files17)
+    probe = '''
+from minicode.cli import parser
+options = {option for action in parser()._actions for option in action.option_strings}
+assert ("--sandbox" in options) is '''
+    for chapter, expected in ((16, False), (17, True)):
+        stage = export_stage(chapter, tmp_path / f"ch{chapter}")
+        result = run_isolated(stage, "probe", probe + repr(expected))
+        assert result.returncode == 0, result.stdout + result.stderr

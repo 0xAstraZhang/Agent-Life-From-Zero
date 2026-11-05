@@ -16,22 +16,23 @@ def load_stages():
     if data.get("version") != 1:
         raise ValueError("不支持的阶段清单版本")
     stages = data["stages"]
-    if [stage["chapter"] for stage in stages] != list(range(17)):
-        raise ValueError("阶段清单必须按顺序包含 00–16")
+    if not stages or [stage["chapter"] for stage in stages] != list(range(len(stages))):
+        raise ValueError("阶段清单必须从 00 开始按顺序编号")
     return stages
 
 
 def stage_files(chapter: int) -> dict[str, str]:
-    if chapter not in range(17):
-        raise ValueError("chapter 必须在 0–16 之间")
+    stages = load_stages()
+    if chapter not in range(len(stages)):
+        raise ValueError(f"chapter 必须在 0–{len(stages) - 1} 之间")
     files = {}
-    for stage in load_stages()[:chapter + 1]:
+    for stage in stages[:chapter + 1]:
         files.update(stage["files"])
     return files
 
 
 def _project(chapter, files):
-    if chapter == 16:
+    if "minicode/cli.py" in files:  # 第 16 章起才有 pyproject 声明的命令行入口
         return (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     packages = [name for name in ("minicode", "lessons") if name + "/__init__.py" in files]
     text = '''[project]

@@ -1,4 +1,4 @@
-"""第 16 章：把已经验证过的组件组装成命令行程序。"""
+"""第 16 章：把已经验证过的组件组装成命令行程序；第 17 章增加 --sandbox。"""
 import argparse
 from contextlib import ExitStack
 from dataclasses import asdict, is_dataclass
@@ -47,7 +47,33 @@ def parser():
     p.add_argument("--skills", type=Path, help="显式加载一个技能目录")
     p.add_argument("--subagents", action="store_true", help="启用只读子 Agent")
     p.add_argument("--mcp-command", help="显式启动一个 stdio MCP 服务，参数按 shell 引号拆分但不使用 shell")
+    p.add_argument("--sandbox", action="store_true",
+                   help="Linux：用 bubblewrap 运行 Bash，只有工作区可写，默认断网")
+    p.add_argument("--sandbox-network", action="store_true", help="沙箱内允许网络（需配合 --sandbox）")
+    p.add_argument("--sandbox-writable", action="append", default=[], type=Path,
+                   help="沙箱内额外可写的目录，可重复（需配合 --sandbox）")
     return p
+
+
+def build_sandbox(args, cwd):
+    from .sandbox import DEFAULT_PROTECTED, Sandbox
+    if not args.sandbox:
+        if args.sandbox_network or args.sandbox_writable:
+            raise ValueError("--sandbox-network 和 --sandbox-writable 需要同时指定 --sandbox")
+        return None
+    writable = [path.expanduser().resolve() for path in args.sandbox_writable]
+    if not all(path.is_dir() for path in writable):
+        raise ValueError("--sandbox-writable 必须是已存在的目录")
+    # 会话、项目说明和技能会进入下一次请求的上下文，命令不能改写它们。
+    candidates = [args.session, args.instructions and cwd / args.instructions, args.skills]
+    extra = [str(path.resolve().relative_to(cwd)) for path in candidates
+             if path and path.resolve().is_relative_to(cwd)]  # 工作区之外本来就是只读
+    sandbox = Sandbox(network=args.sandbox_network,
+                      protected=DEFAULT_PROTECTED + tuple(dict.fromkeys(extra)),
+                      writable=tuple(str(path) for path in writable),
+                      hidden_env=(args.api_key_env,))
+    sandbox.check(cwd)  # 不可用时直接失败，不悄悄退回无沙箱执行
+    return sandbox
 
 
 def ask(tool: str, args: dict) -> bool:
@@ -91,6 +117,7 @@ def run(args, stack):
         raise ValueError("max-turns 和 compact-chars 必须大于 0")
     if args.session and args.session.exists() and not args.resume:
         raise ValueError("会话文件已存在；使用 --resume 恢复，或选择新路径")
+    sandbox = build_sandbox(args, cwd)
     budget = Budget(args.token_budget)
     if args.demo:
         demo_call = call("Glob", pattern="*.py")
@@ -108,6 +135,9 @@ def run(args, stack):
         source = base_model.source
     model = BudgetModel(base_model, budget)
     tools = build_coding_tools(include_bash=True)
+    if sandbox is not None:
+        from .sandbox import sandbox_tools
+        tools = sandbox_tools(tools, sandbox)
     tools.append(TodoList().tool())
     if args.skills:
         from .skills import SkillLibrary

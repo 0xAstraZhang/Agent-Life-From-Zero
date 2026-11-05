@@ -200,12 +200,23 @@
       "title": "交付",
       "files": {
         "examples/16_shipping.py": "examples/16_shipping.py",
-        "minicode/cli.py": "minicode/cli.py",
+        "minicode/cli.py": "lessons/stages/16/minicode/cli.py",
         "minicode/__main__.py": "minicode/__main__.py",
         "tests/test_app.py": "tests/test_app.py",
         "tests/test_provider_config.py": "tests/test_provider_config.py"
       },
       "example": "examples/16_shipping.py"
+    },
+    {
+      "chapter": 17,
+      "title": "沙箱",
+      "files": {
+        "examples/17_sandbox.py": "examples/17_sandbox.py",
+        "minicode/sandbox.py": "minicode/sandbox.py",
+        "minicode/cli.py": "minicode/cli.py",
+        "tests/test_sandbox.py": "tests/test_sandbox.py"
+      },
+      "example": "examples/17_sandbox.py"
     }
   ]
 }

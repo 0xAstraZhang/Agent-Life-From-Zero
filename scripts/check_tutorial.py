@@ -22,8 +22,9 @@ def check_links():
 
 
 def main(argv=None):
+    chapters_all = range(len(load_stages()))
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--chapter", type=int, choices=range(17), help="只验收指定章，仍带入此前文件")
+    parser.add_argument("--chapter", type=int, choices=chapters_all, help="只验收指定章，仍带入此前文件")
     parser.add_argument("--export", type=Path, help="导出指定阶段到不存在或空的目录")
     args = parser.parse_args(argv)
     if args.export is not None:
@@ -36,7 +37,7 @@ def main(argv=None):
         print(f"已导出第 {args.chapter:02} 章到 {destination}；运行步骤见该目录的 README.md")
         return 0
     errors = check_links()
-    chapters = [args.chapter] if args.chapter is not None else list(range(17))
+    chapters = [args.chapter] if args.chapter is not None else list(chapters_all)
     for chapter in chapters:
         with tempfile.TemporaryDirectory(prefix=f"minicode-ch{chapter:02}-") as temporary:
             try:
