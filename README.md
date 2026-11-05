@@ -2,7 +2,7 @@
 
 从零用 Python 构建 minicode：内部统一消息、工具调用与工具结果，外部适配 **OpenAI Chat Completions、OpenAI Responses、Anthropic Messages**。
 
-教程共 00–16 章。先用假模型观察最小循环，再实现三个协议适配器，然后加入编码工具、权限、流式输出、上下文、会话、规划、子 Agent、Skills 和 MCP，最后评测与打包。设计参考 Codex、OpenCode 和 pi，源码版本与取舍见[参考实现](docs/references.md)。
+教程共 00–17 章。先用假模型观察最小循环，再实现三个协议适配器，然后加入编码工具、权限、流式输出、上下文、会话、规划、子 Agent、Skills 和 MCP，接着评测与打包，最后为 Bash 加上 Linux 沙箱。设计参考 Codex、OpenCode 和 pi，源码版本与取舍见[参考实现](docs/references.md)。
 
 ## 从这里开始
 
@@ -72,7 +72,7 @@ uv run minicode --api openai-chat --provider deepseek \
   --read-only -p "阅读 README，说明项目结构"
 ```
 
-交互模式会询问写文件和执行命令的权限。`-p` 非交互模式默认拒绝需要确认的工具；可以用 `--allow-tool Edit` 等参数显式允许某种操作。文件工具限制在工作目录内，**Bash 没有操作系统沙箱**；文件路径检查不能隔离 shell。
+交互模式会询问写文件和执行命令的权限。`-p` 非交互模式默认拒绝需要确认的工具；可以用 `--allow-tool Edit` 等参数显式允许某种操作。文件工具限制在工作目录内，但文件路径检查不能隔离 shell：**默认情况下 Bash 没有操作系统沙箱**。在 Linux 上可以加 `--sandbox`，用 bubblewrap 运行 Bash，见下文。
 
 会话和扩展在学到对应章节后再开启：
 
@@ -82,7 +82,17 @@ uv run minicode --session .minicode/session.jsonl --resume
 uv run minicode --cwd playground --instructions MINICODE.md --skills playground/skills --subagents
 ```
 
-最后一条需要先按第 09、13 章创建项目说明和技能目录。`--mcp-command` 会启动你明确指定的本地程序；教程不会自动加载或执行项目里的 hooks、技能脚本或 MCP 配置。
+最后一条需要先按第 09、13 章创建项目说明和技能目录。
+
+Linux 上安装 bubblewrap 后，可以让 Bash 在沙箱中运行：只有工作区可写，`.git`、`.minicode` 等路径只读，默认断网，密钥类环境变量被移除。沙箱不可用时程序直接退出，不会退回无沙箱执行：
+
+```bash
+uv run minicode --sandbox
+uv run minicode --sandbox --allow-tool Bash -p "运行测试，找出失败原因"
+uv run minicode --sandbox --sandbox-writable ~/.cache/uv --sandbox-network
+```
+
+沙箱不限制读取，也不覆盖 MCP 子进程；范围见[第 17 章](docs/17-sandbox.md)。`--mcp-command` 会启动你明确指定的本地程序；教程不会自动加载或执行项目里的 hooks、技能脚本或 MCP 配置。
 
 ## 检查
 
@@ -97,4 +107,4 @@ uv build
 
 ## 实现范围
 
-三个适配器支持文本、本地函数工具、多轮完整历史、用量与停止状态、SSE 流式输出；保存同来源续轮所需的原始响应数据。教学实现不提供图片和音频输入、服务商托管工具、无损跨模型推理续传或操作系统沙箱。MCP 实现固定版本的 stdio/tools 子集，范围见[第 14 章](docs/14-mcp.md)。
+三个适配器支持文本、本地函数工具、多轮完整历史、用量与停止状态、SSE 流式输出；保存同来源续轮所需的原始响应数据。教学实现不提供图片和音频输入、服务商托管工具或无损跨模型推理续传；操作系统沙箱只有 Linux 上基于 bubblewrap 的基础版本（第 17 章）。MCP 实现固定版本的 stdio/tools 子集，范围见[第 14 章](docs/14-mcp.md)。

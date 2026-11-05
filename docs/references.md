@@ -34,8 +34,9 @@ minicode 从这里借鉴的是边界：配置 `api` 和服务商来源各自独�
 - [Prompt 与 ResponseStream](https://github.com/openai/codex/blob/93b4e5b4c6474cdbf12614c4ac3acbd006fbee89/codex-rs/core/src/client_common.rs)：观察客户端边界与流事件。
 - [ResponseItem](https://github.com/openai/codex/blob/93b4e5b4c6474cdbf12614c4ac3acbd006fbee89/codex-rs/protocol/src/models.rs)：消息、reasoning、函数调用与结果分别表达；item ID 和 call ID 不混用。
 - [ToolRouter](https://github.com/openai/codex/blob/93b4e5b4c6474cdbf12614c4ac3acbd006fbee89/codex-rs/core/src/tools/router.rs)：模型可见声明与执行注册表分离。
+- [Linux 沙箱的 bwrap 参数](https://github.com/openai/codex/blob/93b4e5b4c6474cdbf12614c4ac3acbd006fbee89/codex-rs/linux-sandbox/src/bwrap.rs)、[受保护的工作区元数据路径](https://github.com/openai/codex/blob/93b4e5b4c6474cdbf12614c4ac3acbd006fbee89/codex-rs/protocol/src/permissions.rs)、[沙箱拦截的推测](https://github.com/openai/codex/blob/93b4e5b4c6474cdbf12614c4ac3acbd006fbee89/codex-rs/sandboxing/src/denial.rs)：对应第 17 章。
 
-minicode 保留了较小的串行执行器、显式审批和只读委派。沙箱、复杂调度、工作区隔离等需要单独实现，不能因为参考了 Codex 就声称具备这些能力。
+minicode 保留了较小的串行执行器、显式审批和只读委派。第 17 章只实现了 Linux 上基于 bubblewrap 的基础沙箱；跨平台沙箱、按域名放行网络、复杂调度和工作区隔离需要单独实现，不能因为参考了 Codex 就声称具备这些能力。
 
 ## 协议的一手资料
 
