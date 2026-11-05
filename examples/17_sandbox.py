@@ -33,7 +33,8 @@ with TemporaryDirectory() as directory:
     print("Write notes.txt:", "拒绝" if written.is_error else "成功")
 
     try:
-        sandbox.check(root)
+        sandbox = sandbox.check(root)  # 返回固定了 bwrap 绝对路径的副本
+        runner = ToolRunner(sandbox_tools(build_coding_tools(), sandbox), ToolContext(root))
     except SandboxUnavailable as error:
         print("沙箱不可用，跳过真实命令：", error)
     else:

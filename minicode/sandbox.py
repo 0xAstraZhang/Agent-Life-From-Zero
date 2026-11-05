@@ -29,14 +29,17 @@ class Sandbox:
     protected: tuple[str, ...] = DEFAULT_PROTECTED  # 相对工作区，或绝对路径
     writable: tuple[str, ...] = ()                   # 工作区之外额外可写的目录
     hidden_env: tuple[str, ...] = ()                 # 名称不含 KEY 等字样、仍需移除的变量
-    executable: str = "bwrap"
+    executable: str = "bwrap"                        # check() 返回的副本里是绝对路径
+
+    def writable_roots(self, root: Path) -> list[Path]:
+        return [Path(root).resolve(), *(Path(p).expanduser().resolve() for p in self.writable)]
 
     def protected_paths(self, root: Path) -> list[Path]:
-        root = Path(root).resolve()
+        roots = self.writable_roots(root)
         paths = []
         for entry in self.protected:
-            path = (root / Path(entry).expanduser()).resolve()
-            if path.is_relative_to(root):  # 工作区之外本来就是只读
+            path = (roots[0] / Path(entry).expanduser()).resolve()
+            if any(path.is_relative_to(writable) for writable in roots):  # 其余位置本来就是只读
                 paths.append(path)
         return paths
 
@@ -49,7 +52,7 @@ class Sandbox:
         # 挂载按顺序生效：后面的挂载覆盖前面的同一路径。
         argv = [self.executable, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
                 "--tmpfs", "/tmp"]
-        for path in [root, *(Path(p).expanduser().resolve() for p in self.writable)]:
+        for path in self.writable_roots(root):
             argv += ["--bind", str(path), str(path)]
         for path in self.protected_paths(root):
             if path.exists():  # bwrap 只能挂载已存在的路径
@@ -62,25 +65,43 @@ class Sandbox:
             argv.append("--unshare-net")
         return argv + ["--chdir", str(root), "--", "/bin/sh", "-c", command]
 
-    def check(self, root: Path) -> None:
-        """用真实参数启动一次空命令；能装上 bwrap 不代表内核允许创建命名空间。"""
+    def locate(self, root: Path) -> str:
+        """返回 bwrap 的绝对路径；沙箱可写目录里的同名程序一律跳过。"""
+        unsafe = self.writable_roots(root)
+        if Path(self.executable).is_absolute():
+            candidates = [self.executable]
+        else:
+            candidates = [shutil.which(self.executable, path=directory)
+                          for directory in os.environ.get("PATH", "").split(os.pathsep) if directory]
+        for candidate in candidates:
+            if candidate is None:
+                continue
+            path = Path(candidate).resolve()  # 同时识别指向可写目录的符号链接
+            if path.is_file() and not any(path.is_relative_to(writable) for writable in unsafe):
+                return str(path)
+        raise SandboxUnavailable("找不到可信的 bwrap（工作区和额外可写目录里的同名程序不算），请先安装 bubblewrap")
+
+    def check(self, root: Path) -> "Sandbox":
+        """固定 bwrap 的绝对路径，再用真实参数启动一次空命令；返回可以交给 sandbox_tools 的副本。"""
         if not sys.platform.startswith("linux"):
             raise SandboxUnavailable("沙箱只支持 Linux（bubblewrap）")
-        if shutil.which(self.executable) is None:
-            raise SandboxUnavailable("找不到 bwrap，请先安装 bubblewrap")
+        # 之后每次都执行这个路径，不再按 PATH 查找：沙箱内的命令可能在 PATH 里的可写目录放同名程序。
+        ready = replace(self, executable=self.locate(root))
         try:
-            result = subprocess.run(self.argv("true", root), stdin=subprocess.DEVNULL,
+            result = subprocess.run(ready.argv("true", root), stdin=subprocess.DEVNULL,
                                     capture_output=True, text=True, timeout=10)
         except (OSError, subprocess.TimeoutExpired) as error:
             raise SandboxUnavailable(f"bwrap 无法启动：{error}") from error
         if result.returncode != 0:
             detail = result.stderr.strip()[-300:] or f"退出码 {result.returncode}"
             raise SandboxUnavailable(f"bwrap 无法创建沙箱（常见原因：系统或容器禁止非特权用户命名空间）：{detail}")
+        return ready
 
     def describe(self) -> str:
         network = "已开启" if self.network else "已断开"
         protected = "、".join(self.protected) or "无"
-        return (f"命令在 bubblewrap 沙箱中运行：只有工作区可写，受保护路径（{protected}）只读，网络{network}；"
+        writable = "、".join(["工作区", *self.writable])
+        return (f"命令在 bubblewrap 沙箱中运行：只有{writable}可写，受保护路径（{protected}）只读，网络{network}；"
                 "/tmp 是本条命令独立的临时目录，结束后清空；命令结束时其后台进程一并终止。")
 
 
@@ -89,6 +110,8 @@ def sandbox_tools(tools: list[Tool], sandbox: Sandbox) -> list[Tool]:
 
     def bash(inner):
         def execute(args, ctx):
+            if not Path(sandbox.executable).is_absolute():
+                return ToolResult("", "沙箱未经 check() 固定 bwrap 的绝对路径，拒绝执行", True)
             # 只改写命令；超时、截断和进程组清理仍由原 Bash 工具负责。
             command = "exec " + shlex.join(sandbox.argv(args["command"], ctx.cwd))
             return inner(dict(args, command=command), ctx)

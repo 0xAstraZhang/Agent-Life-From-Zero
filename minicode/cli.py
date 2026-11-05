@@ -65,15 +65,17 @@ def build_sandbox(args, cwd):
     if not all(path.is_dir() for path in writable):
         raise ValueError("--sandbox-writable 必须是已存在的目录")
     # 会话、项目说明和技能会进入下一次请求的上下文，命令不能改写它们。
+    # 它们可能在工作区外的额外可写目录里，所以全部交给 Sandbox，由它判断哪些需要只读挂载。
+    def shown(path):
+        path = path.resolve()
+        return str(path.relative_to(cwd)) if path.is_relative_to(cwd) else str(path)
     candidates = [args.session, args.instructions and cwd / args.instructions, args.skills]
-    extra = [str(path.resolve().relative_to(cwd)) for path in candidates
-             if path and path.resolve().is_relative_to(cwd)]  # 工作区之外本来就是只读
+    extra = [shown(path) for path in candidates if path]
     sandbox = Sandbox(network=args.sandbox_network,
                       protected=DEFAULT_PROTECTED + tuple(dict.fromkeys(extra)),
                       writable=tuple(str(path) for path in writable),
                       hidden_env=(args.api_key_env,))
-    sandbox.check(cwd)  # 不可用时直接失败，不悄悄退回无沙箱执行
-    return sandbox
+    return sandbox.check(cwd)  # 返回固定了 bwrap 绝对路径的副本；不可用时直接失败
 
 
 def ask(tool: str, args: dict) -> bool:

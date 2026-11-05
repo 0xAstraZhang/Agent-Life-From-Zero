@@ -43,13 +43,24 @@ bwrap --version
 uv run python examples/17_sandbox.py
 ```
 
-bwrap 依赖内核的非特权用户命名空间。装上了不代表能用：Docker 的默认配置、一些发行版的安全策略都可能禁止它。所以 `Sandbox.check()` 不只是查找 `bwrap` 命令，而是用真实参数运行一次 `true`：
+`Sandbox.check()` 做两件事。
+
+第一，**固定 bwrap 的绝对路径**。不能每次都按 PATH 查找 `bwrap`：用 `uv run` 启动时，项目里的 `.venv/bin` 排在 PATH 最前面。如果工作区就是项目目录，沙箱里的命令可以在 `.venv/bin` 放一个名为 `bwrap` 的脚本，下一次 Bash 就会在沙箱外运行这个脚本，带着完整的环境变量。所以 `locate()` 按 PATH 顺序查找时，跳过工作区和额外可写目录里的同名程序，包括指向这些目录的符号链接；`check()` 返回一个记录了绝对路径的副本，之后每次都执行这个路径：
 
 ```python
-result = subprocess.run(self.argv("true", root), stdin=subprocess.DEVNULL,
+ready = replace(self, executable=self.locate(root))
+```
+
+`sandbox_tools()` 的 Bash 包装只接受绝对路径；没有经过 `check()` 的 Sandbox 会直接返回错误。
+
+第二，**确认内核允许创建沙箱**。bwrap 依赖内核的非特权用户命名空间。装上了不代表能用：Docker 的默认配置、一些发行版的安全策略都可能禁止它。所以 `check()` 用真实参数运行一次 `true`：
+
+```python
+result = subprocess.run(ready.argv("true", root), stdin=subprocess.DEVNULL,
                         capture_output=True, text=True, timeout=10)
 if result.returncode != 0:
     raise SandboxUnavailable(...)
+return ready
 ```
 
 检查失败时，CLI 打印原因，以退出码 2 结束。用户明确要求了沙箱，环境不支持时就应该停下，而不是在没有沙箱的情况下继续。
@@ -83,7 +94,7 @@ for path in self.protected_paths(root):
 
 受保护路径有两个细节：
 
-- `protected_paths()` 先 `resolve()` 再比较，只保留工作区里的路径。工作区外本来就是只读。
+- `protected_paths()` 先 `resolve()` 再比较，只保留位于工作区或额外可写目录里的路径。其他位置本来就是只读，不用再挂载；但额外可写目录里的会话文件，必须重新设为只读。
 - bwrap 只能挂载已经存在的路径。`.minicode` 还不存在时，命令可以创建它。Write、Edit 的检查只看路径，不受这个限制（见第四步）。
 
 ## 第三步：包装 Bash，而不是重写它
@@ -116,7 +127,7 @@ def execute(args, ctx):
 
 因为先解析再比较，`alias/config`（`alias` 是指向 `.git` 的符号链接）会被拒绝，`.git/../ok.txt` 会被允许。`protects()` 用 `Path.is_relative_to` 按路径层级比较，`.gitignore` 不会被误认为在 `.git` 里面。
 
-CLI 还会把本次使用的会话文件、`--instructions` 文件和 `--skills` 目录加入受保护列表，前提是它们在工作区内。这三样都会进入下一次请求的上下文。命令如果能改写它们，就能给以后的会话留下指令。
+CLI 还会把本次使用的会话文件、`--instructions` 文件和 `--skills` 目录加入受保护列表。这三样都会进入下一次请求的上下文。命令如果能改写它们，就能给以后的会话留下指令。它们不一定在工作区里：例如 `--session /data/state/s.jsonl --sandbox-writable /data/state` 时，会话文件在额外可写目录中，同样要只读挂载。CLI 把三者都交给 `Sandbox`，由 `protected_paths()` 统一判断。
 
 ## 第五步：告诉模型规则，但不猜测拦截原因
 
@@ -180,8 +191,8 @@ bwrap 不可用时，前两行相同，接着打印不可用的原因，实验�
 
 [本章测试](../tests/test_sandbox.py)分两组：
 
-- 不需要 bwrap：参数顺序、密钥变量、受保护路径、Write 和 Edit 的拒绝、工具说明；用一个假的 bwrap 脚本验证引号和超时；不可用时的报错；CLI 参数。
-- 需要真实 bwrap：写入范围、`.git` 只读、断网、环境变量、额外可写目录，以及后台进程和 `setsid` 进程的清理。bwrap 不可用时这一组自动跳过，加 `-rs` 可以看到跳过原因。
+- 不需要 bwrap：参数顺序、密钥变量、受保护路径（包括额外可写目录里的会话文件）、Write 和 Edit 的拒绝、工具说明；用假的 bwrap 脚本验证引号、超时，以及 PATH 里被植入的同名程序不会被执行；不可用时的报错；CLI 参数。
+- 需要真实 bwrap：写入范围、`.git` 只读、断网、环境变量、额外可写目录及其中受保护的文件，以及后台进程和 `setsid` 进程的清理。bwrap 不可用时这一组自动跳过，加 `-rs` 可以看到跳过原因。
 
 另外，[阶段测试](../tests/test_stage_export.py)确认第 16 章的导出目录里还没有沙箱代码。
 
@@ -195,9 +206,10 @@ bwrap 不可用时，前两行相同，接着打印不可用的原因，实验�
 - **按名称识别密钥变量。** CLI 还会移除 `--api-key-env` 指定的变量；名称里没有上述字样的其他密钥不会被识别。
 - **只覆盖 Bash 和文件工具。** MCP 子进程、hooks、技能里的脚本都不在沙箱内。
 - **只支持 Linux。** macOS 需要 Seatbelt（`sandbox-exec`）配置，Windows 需要另一套机制。
+- **工作区里的文件之后可能在沙箱外执行。** 除受保护路径外，命令可以改写工作区里的任何文件，包括 `.venv`、测试配置和构建脚本；你之后在沙箱外运行它们时，改动就会生效。沙箱不检查写进去的内容，合并前仍要看 diff。
 - **这是命名空间隔离，不是虚拟机。** 沙箱和主机共用一个内核，内核漏洞可以突破它。处理不可信代码时，仍然应该把整个 Agent 放在容器或虚拟机里运行。
 
-作为对照：在教程固定的 Codex 提交里，`linux-sandbox`、`sandboxing`、`network-proxy`、`windows-sandbox-rs` 四个 crate 合计约 9 万行 Rust，其中网络代理和 Windows 占七成多。本章的 `sandbox.py` 约 120 行，只覆盖其中最基础的一块：Linux 上的文件系统只读和网络整体开关。
+作为对照：在教程固定的 Codex 提交里，`linux-sandbox`、`sandboxing`、`network-proxy`、`windows-sandbox-rs` 四个 crate 合计约 9 万行 Rust，其中网络代理和 Windows 占七成多。本章的 `sandbox.py` 约 140 行，只覆盖其中最基础的一块：Linux 上的文件系统只读和网络整体开关。
 
 ## 练习
 
