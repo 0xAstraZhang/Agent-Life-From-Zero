@@ -1,6 +1,5 @@
-"""运行第 1 章自包含快照；实现不依赖最终 minicode。"""
-from lessons.ch01 import main, run
-
+"""第 01 章：默认执行真实模型的单工具循环。"""
+from lessons.ch01 import main
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

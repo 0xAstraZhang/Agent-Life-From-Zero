@@ -1,6 +1,10 @@
-# 第 7 章：把权限放在工具执行之前
+# 第 7 章：在工具执行前加一个确认点
 
-先回到教程仓库根目录，执行下面的导出命令；随后进入独立的本章目录。手写时保留自己的练习目录，用导出版本核对文件清单和差异：
+[上一章：编码工具](06-coding-tools.md) · [目录](README.md) · [下一章：流式输出](08-streaming.md)
+
+上一章模型已经能提出文件修改。本章只增加一个决定：模型要求写入之后，先问用户，再执行。拒绝也是一个工具结果，应回到模型的下一轮请求中。
+
+先在教程仓库根目录导出本章，再进入练习目录：
 
 ```bash
 uv run python scripts/check_tutorial.py --chapter 07 --export /tmp/minicode-ch07
@@ -8,64 +12,79 @@ cd /tmp/minicode-ch07
 uv sync
 ```
 
-以下运行和测试命令在本章练习目录中执行。目录只含第 00–07 章的代码与测试；文件增量由[阶段清单](../lessons/stages.json)记录。导出目标必须为空，不会覆盖已有练习。
+导出目标须为空或尚不存在。以下命令在练习目录执行；真实调用沿用第 00 章的环境变量配置。
 
-上一章的工具已经能写文件和执行命令。现在需要决定：模型提出一次调用后，什么时候可以执行？
+## 1. 先亲自批准或拒绝一次调用
 
-本章增加 [permissions.py](../minicode/permissions.py)，把权限检查包装在 `ToolRunner` 外面。
-模型适配器和 Agent 循环不变。
-本章结束时，同一组工具可以用于交互模式、无人值守模式和只读模式。
+```bash
+uv run python examples/07_permissions.py
+```
 
-## 本章文件清单
+真实模型会请求 `WriteNote`，程序显示工具名和内容，然后询问是否允许创建临时目录中的 `note.txt`。输入 `y` 时创建文件；其他回答拒绝。最后看两件事：模型怎样描述结果，Python 打印的“文件存在”是否一致。
 
-保留上一章全部文件，新建 [minicode/permissions.py](../minicode/permissions.py)，新增[实验入口](../examples/07_permissions.py)和[本章测试](../tests/test_permissions.py)。这些链接是本章完整文件；导出目录中的同名文件内容一致。正文随后展示的是完整文件中的解释片段，不是省略了导入后还能单独运行的脚本。
-
-完成后运行本章命令，再执行 `uv run python -m pytest tests -q`，确认已有能力没有回退。不要把前面建立的模型、工具或权限对象全部丢掉重建；只在下文指定的位置增加本章能力。
-
-## 1. 请求执行与授权执行是两件事
-
-`ToolCall` 只表示“模型想做什么”，不能证明用户已经同意。
-因此权限代码不读取模型给出的“用户已授权”等文字，也不让工具自己决定能否跳过审批。
-
-执行链变成：
+再运行一次，作出相反决定。这个练习只允许写入固定练习文件，完整入口是 [07_permissions.py](../examples/07_permissions.py)。
 
 ```text
-Agent
-  → PermissionRunner.run(ToolCall)
-  → ToolRunner.run(ToolCall)
-  → Tool.execute(arguments, context)
-  → ToolResult
+模型提出 WriteNote
+    ↓
+询问用户
+    ├─ 同意 → 执行工具 → 成功结果
+    └─ 拒绝 → 不执行   → 拒绝结果
+    ↓
+结果进入历史 → 再请求模型 → 回答
 ```
 
-两个 runner 公开相同的方法：
+## 2. 先写最小包装器
+
+已有 `ToolRunner.run()` 负责调用函数。现在给它包上一层：
 
 ```python
-runner.specs()       # 返回模型可以看到的工具定义
-runner.run(call)     # 返回对应 call.id 的 ToolResult
+class ConfirmRunner:
+    def __init__(self, inner, ask):
+        self.inner, self.ask = inner, ask
+        self.context, self.tools = inner.context, inner.tools
+
+    def specs(self):
+        return self.inner.specs()
+
+    def run(self, request):
+        if self.ask(request.name, request.arguments):
+            return self.inner.run(request)
+        return ToolResult(request.id, "用户拒绝写入；请说明未执行，不要绕过拒绝。", True)
 ```
 
-包装器还转发 `tools` 和 `context`，供后续的 hooks、规划和子 Agent 组合使用。
-Agent 无须知道包装了几层。
+这是实验里的完整最小类。`specs()` 沿用原工具说明；`run()` 只增加一次判断。拒绝结果使用原调用 ID，所以 Agent 可以像处理其他工具结果一样把它放进历史。
 
-## 2. 先实现三个明确的决定
+再写收集用户回答的函数：
 
-权限规则从最小可用的三种情况开始：
+```python
+def ask(name, arguments):
+    print("模型请求：", name, arguments)
+    return input("允许写入练习文件？[y/N] ").strip().lower() == "y"
+```
 
-| 情况 | 行为 |
+把原来的 `inner` 换成 `ConfirmRunner(inner, ask)` 后，Agent 循环保持不变。权限来自用户输入，模型消息中的“用户已经授权”不会改变这个布尔值。
+
+这个检查点只包含一个固定的 WriteNote，因此每次调用都询问。下一步再解决多个工具的不同规则。
+
+## 3. 加入只读、允许名单和无人值守
+
+替换为完整 [PermissionRunner](../minicode/permissions.py)，运行增强检查点：
+
+```bash
+uv run python examples/07_permissions.py --step enhanced
+```
+
+同一次写入现在经过统一权限执行器。增加规则时按实际需求逐步写：
+
+| 情况 | 执行方式 |
 | --- | --- |
-| 本地工具标为只读 | 直接执行 |
-| 工具名在显式 `allowed` 集合中 | 直接执行 |
-| 其余工具 | 调用审批函数；没有审批函数则拒绝 |
+| 只读工具 | 直接执行 |
+| 工具在用户显式允许名单中 | 直接执行 |
+| 其他工具 | 询问用户；没有回调则拒绝 |
+| 开启只读模式，但调用会写入 | 拒绝，优先于允许名单与询问 |
 
-`allowed` 匹配完整工具名，不使用 shell 命令前缀或模糊子串。
-例如 `allowed=["Write"]` 允许该工具的所有合法调用，不是只允许某个路径。
-文件路径仍由第 6 章的工具检查。
-允许 `Bash` 则意味着允许本次进程执行任意通过 schema 校验的 shell 命令。
-
-这里不尝试用字符串拆分证明某个 shell 命令“安全”。
-需要更细的约束时，可以新增专用工具，例如只执行固定测试命令的 `RunTests`。
-
-核心分支可以直接读成规则：
+增强版的核心代码为：
 
 ```python
 if self.read_only and not tool.read_only:
@@ -77,122 +96,51 @@ if not self.approval.ask(call.name, call.arguments):
 return self.inner.run(call)
 ```
 
-完整实现先检查工具名和参数。
-参数缺字段、类型不对或 JSON 解析失败时，直接交给工具执行器返回校验错误，不先打扰用户。
+先检查工具名称和参数，再问用户，可以避免为根本不能执行的调用提问。完整执行器将这类错误交给内层 ToolRunner 处理。
 
-## 3. 审批是一个共享对象
+允许名单匹配完整工具名。允许 Write 表示允许它的所有合法调用，不仅是某个文件；允许 Bash 则开放通用命令能力。需要只运行固定检查时，继续使用上一章的 RunTests。
 
-命令行中的审批函数只负责展示具体动作并收集回答：
+## 4. 让只读限制在执行入口生效
+
+只读模式先通过 `specs()` 隐藏可写工具。但旧历史仍可能包含写入请求，所以 `run()` 也必须拒绝。两者分别决定“给模型看什么”和“程序实际允许什么”。
 
 ```python
-def ask(name, arguments):
-    print(name, arguments)
-    return input("允许执行？[y/N] ").strip().lower() == "y"
+read_only_runner = PermissionRunner(inner, read_only=True)
+```
 
+不能通过 `allowed=["Bash"]` 覆盖只读模式。也不能把“拒绝 Write”理解成所有路径都不可写：如果另外允许 Bash，它仍能写文件。
+
+此时可以自行增加实验：将 WriteNote 加入允许名单，观察不再提问；再开启只读模式，确认它仍被拒绝。
+
+## 5. 多个 Agent 共用终端时，再处理审批锁
+
+单个 Agent 的最小审批已经完成。第 12 章创建子 Agent 时，多个实例可能同时调用 `input()`，这时才需要共享 `Approval` 对象与它的锁：
+
+```python
 approval = Approval(ask)
 runner = PermissionRunner(inner, approval)
 ```
 
-只有布尔值 `True` 表示同意。
-没有回答、其他字符串和未配置回调都不会自动转成同意。
-拒绝也会成为一条工具错误结果，让模型知道这次调用没有执行。
+所有需要向同一个用户提问的执行器共用这个对象。锁限制的是同时出现的提问，不是全部工具执行。完整 [permissions.py](../minicode/permissions.py)已经提供这一实现，可以在学子 Agent 时再细读。
 
-多个 Agent 可能同时请求审批。
-如果每个 Agent 只锁自己的实例，它们仍然可以同时调用 `input()`。
-因此锁属于共享的 `Approval`：
+## 6. 检查批准与拒绝都真正进入历史
 
-```python
-class Approval:
-    def __init__(self, callback=None):
-        self.callback = callback
-        self._lock = RLock()
-
-    def ask(self, name, arguments):
-        with self._lock:
-            if self.callback is None:
-                return False
-            return self.callback(name, arguments) is True
-```
-
-后面创建子 Agent 时，传递这个对象；不要重新创建一个拥有独立锁的审批对象。
-这里串行化的是用户交互，不是全部工具执行。
-
-## 4. 只读模式需要双重检查
-
-只读模式首先从 `specs()` 隐藏可写工具，让模型不再看到 Write、Edit 和 Bash。
-但仅从工具列表删除还不够：历史消息或错误的模型输出仍可能携带这些调用。
-
-`run()` 因此再次检查 `tool.read_only`。
-只读限制优先于 `allowed` 和审批，不能通过 `allowed=["Bash"]` 绕过。
-
-```python
-plan_runner = PermissionRunner(inner, read_only=True)
-print([spec.name for spec in plan_runner.specs()])
-# ['Read', 'Glob', 'Grep']
-```
-
-`read_only` 和 `parallel_safe` 仍是不同的属性。
-把一个会启动可写子 Agent 的工具标成只读，会破坏这条边界。
-第 12 章的初版子 Agent 只获得只读工具，不通过名称伪装获得写入权限。
-
-## 5. 交互与无人值守共用执行层
-
-交互模式提供 `Approval(ask)`，在必要时询问。
-无人值守模式没有人回答，就用默认的 `Approval()`。
-
-```python
-interactive = PermissionRunner(inner, Approval(ask))
-unattended = PermissionRunner(inner)
-known_workflow = PermissionRunner(inner, allowed=["Write"])
-```
-
-真实调用时，应由用户通过 CLI 显式选择允许的工具。
-项目文件里的自然语言不应替用户添加 allow 规则。
-我们也不自动执行项目中的 hooks 或 MCP 启动命令；后续章节会保留明确的加载入口。
-
-权限层是执行约束，提示词中的“不要绕过拒绝”只是给模型的行为说明。
-后者不能代替前者。
-如果同时允许 Bash 和拒绝 Write，Bash 仍有写文件的能力；规则应按实际能力理解。
-
-## 6. 跑三个决定
+下面两条默认仍调用真实模型，明确指定本次决定，便于重复观察：
 
 ```bash
-uv run python examples/07_permissions.py
+uv run python examples/07_permissions.py --decision allow
+uv run python examples/07_permissions.py --decision deny
 ```
 
-[示例](../examples/07_permissions.py) 在临时目录运行，并输出：
-
-```text
-默认拒绝: True 文件存在: False
-显式允许: True 文件内容: hello
-只读模式工具: Read, Glob, Grep
-```
-
-它先发出同一次 Write 调用，确认默认拒绝没有创建文件。
-随后明确允许 Write，验证文件出现。
-最后即使 `allowed` 含 Bash，只读模式也不会公布它。
-
-本章新增的是执行条件，不需要重写 Read、Write，也不需要为三种模型协议各写一套权限逻辑。
-
-## 7. 检查拒绝路径和并发提问
+离线回归显式添加 `--offline`。不传决定时，离线入口默认拒绝，不等待终端输入：
 
 ```bash
+uv run python examples/07_permissions.py --offline --decision allow
+uv run python examples/07_permissions.py --offline --decision deny
+uv run python examples/07_permissions.py --step enhanced --offline --decision deny
 uv run python -m pytest tests/test_permissions.py -q
 ```
 
-[测试](../tests/test_permissions.py) 验证默认拒绝、精确允许、只读限制和无效参数不提问。
-还有一个并发测试：四个 runner 共用一个 Approval，同时请求写入。
-回调记录正在运行的审批数量，最大值应始终为 1。
+同意时文件存在，拒绝时不存在。继续检查模型第二次请求中的工具结果：它必须保留原调用 ID，并将拒绝标记为错误。测试随后覆盖只读优先、无效参数不询问，以及共享审批对象不会同时提问。
 
-这是一次能定位原理的测试：如果把锁放回每个 runner，最大值就可能大于 1。
-不需要真实终端输入，也不需要模型 API。
-
-## 练习
-
-1. 新增 `RunTests` 工具，执行用户配置的固定命令，并把它与通用 Bash 的权限区分开。
-2. 为审批结果增加原因，展示到工具结果和日志中。
-3. 为 Write 增加仅允许新文件的规则，并覆盖“文件已存在”的测试。
-
-参考 [Codex 工具路由](https://github.com/openai/codex/blob/93b4e5b4c6474cdbf12614c4ac3acbd006fbee89/codex-rs/core/src/tools/router.rs) 的集中执行入口。本章没有复刻完整沙箱、组织策略或目录信任系统；本地约束的范围以代码和测试为准。
-
-[上一章：编码工具](06-coding-tools.md) · [目录](README.md) · [下一章：流式输出](08-streaming.md)
+本章保留全部已有工具，增加[最小审批实验](../examples/07_permissions.py)和[完整权限执行器](../minicode/permissions.py)；累计文件见[阶段清单](../lessons/stages.json)。下一章只改变回复显示方式，继续使用相同工具和权限执行入口。

@@ -1,7 +1,7 @@
 [project]
 name = "agent-life-from-zero"
 version = "0.2.0"
-description = "从统一消息与三协议适配开始，逐步构建 Python Coding Agent"
+description = "从真实模型对话和最小工具循环开始，逐步构建 Python Coding Agent"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = ["httpx>=0.28,<1", "jsonschema>=4.23,<5"]

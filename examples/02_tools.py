@@ -1,6 +1,5 @@
-"""运行第 2 章快照；此版本尚无流式、会话、权限等后续机制。"""
+"""第 02 章：默认让真实模型选择两个工具。"""
 from lessons.ch02 import main
 
-
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

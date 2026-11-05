@@ -2,13 +2,13 @@
 
 [返回目录](README.md)
 
-本教程参考三个开源项目的分层方法，Python 实现按教学需要重新组织。下面固定的是本次改写核对过的提交，避免仓库目录调整后教程失去依据。核对日期：2026-11-04。
+本教程参考三个开源项目的分层方法，Python 实现按教学需要重新组织。下面保留已核对的固定提交，方便完成小原型后对照源码。源码核对日期：2026-11-04。
 
 ## pi：统一消息和模型接口
 
 旧仓库 `badlogic/pi-mono` 已重定向到 `earendil-works/pi`。本教程参考提交 `676af1d777ef6f04b6bc8daf4cf3b9b1799cff4d`。
 
-- [统一消息、工具、上下文与事件](https://github.com/earendil-works/pi/blob/676af1d777ef6f04b6bc8daf4cf3b9b1799cff4d/packages/ai/src/types.ts)：对应第 01、02 章的内部类型。
+- [统一消息、工具、上下文与事件](https://github.com/earendil-works/pi/blob/676af1d777ef6f04b6bc8daf4cf3b9b1799cff4d/packages/ai/src/types.ts)：对应第 03 章从字典骨架提取的内部类型。
 - [Agent 类型与转换边界](https://github.com/earendil-works/pi/blob/676af1d777ef6f04b6bc8daf4cf3b9b1799cff4d/packages/agent/src/types.ts)：观察模型可见工具与可执行工具怎样关联。
 - [Agent Loop](https://github.com/earendil-works/pi/blob/676af1d777ef6f04b6bc8daf4cf3b9b1799cff4d/packages/agent/src/agent-loop.ts)：观察模型输出、执行和结果回传的先后关系。
 - [Chat Completions](https://github.com/earendil-works/pi/blob/676af1d777ef6f04b6bc8daf4cf3b9b1799cff4d/packages/ai/src/api/openai-completions.ts)、[Responses 转换](https://github.com/earendil-works/pi/blob/676af1d777ef6f04b6bc8daf4cf3b9b1799cff4d/packages/ai/src/api/openai-responses-shared.ts)、[Anthropic Messages](https://github.com/earendil-works/pi/blob/676af1d777ef6f04b6bc8daf4cf3b9b1799cff4d/packages/ai/src/api/anthropic-messages.ts)：对应第 03–05、08 章。

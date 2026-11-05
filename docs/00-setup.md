@@ -1,143 +1,125 @@
-# 第 00 章：环境准备，先看清一次模型交互
+# 第 00 章：让 Python 真正和模型说一句话
 
 [目录](README.md) · 下一章：[最小 Agent Loop](01-agent-loop.md)
 
-## 这一章的结果
+这一章先做一件能看见结果的事：在 Python 中发出问题，打印模型的真实回答。然后再给它发第二句话，观察历史消息如何让对话连起来。
 
-你会运行一个不联网的小程序，看见一条用户消息变成一条模型回复。先认识消息和请求，再在下一章让程序执行模型提出的工具调用。
+## 1. 准备环境和模型
 
-本章只需一个 Python 文件，依赖和环境由仓库配置提供：
+需要 Python 3.12+、[uv](https://docs.astral.sh/uv/getting-started/installation/)，以及一个支持 **Chat Completions 和函数工具调用**的模型账号。后两章会沿用同一模型；模型 ID 请填写服务商实际提供的值。
 
-- [项目依赖](../pyproject.toml)：Python 版本、运行依赖和测试依赖。
-- [第 00 章实验](../examples/00_hello.py)：一次请求和回复。
-
-## 第一步：安装环境
-
-需要 Python 3.12 或更高版本。使用 [uv 官方安装说明](https://docs.astral.sh/uv/getting-started/installation/)安装 uv，然后在仓库根目录执行：
+在仓库根目录安装依赖：
 
 ```bash
 uv sync --locked
-uv run python --version
 ```
 
-第一条命令按 `uv.lock` 安装依赖，并把当前项目安装为可编辑包。这样修改 `minicode/` 后，示例立刻使用新代码，不用每改一次就重新安装。
-
-依赖各做一件事：
-
-| 依赖 | 用在哪里 |
-| --- | --- |
-| `httpx` | 第 03 章开始发送 HTTP 请求、读取 SSE |
-| `jsonschema` | 第 02 章验证工具参数 |
-| `pytest` | 从第一章开始验证确定的控制流 |
-
-我们直接实现 API 的请求和响应转换。HTTP 库只处理传输，不替我们决定消息是什么、工具什么时候执行。
-
-## 第二步：运行第一次交互
+在同一个终端设置配置。`BASE_URL` 是 API 根地址，程序会在末尾加 `/chat/completions`：
 
 ```bash
-uv run python examples/00_hello.py
+export MINICODE_API="openai-chat"
+export MINICODE_BASE_URL="https://api.openai.com/v1"
+export MINICODE_MODEL="填写你账号可用的模型 ID"
 ```
 
-预期输出：
+另行通过环境变量设置 `MINICODE_API_KEY`。密钥不写进 Python 文件或仓库；程序不会自动读取 `.env`。真实请求会产生服务商费用。已有完整的 `LLM_MODEL`、`LLM_BASE_URL`、`LLM_API_KEY` 时，也可以继续用这一组；不要同时留下半组 `MINICODE_*` 配置。
 
-```text
-你好，我是 minicode。
-停止原因： stop
-模型请求次数： 1
-```
-
-在空目录中创建 `hello.py`，写入下面的完整代码。它不导入后续章节的任何文件：
-
-```python
-from copy import deepcopy
-
-
-class ScriptedModel:
-    def __init__(self):
-        self.requests = []
-
-    def complete(self, messages):
-        self.requests.append(deepcopy(messages))
-        return {"text": "你好，我是 minicode。", "stop_reason": "stop"}
-
-
-model = ScriptedModel()
-reply = model.complete([{"role": "user", "text": "你好"}])
-print(reply["text"])
-print("停止原因：", reply["stop_reason"])
-print("模型请求次数：", len(model.requests))
-```
-
-用 `python hello.py` 运行手写版本。这里先用普通字典表达消息，`complete()` 接收消息列表并返回文本和停止原因。下一章才把这些数据改成明确的类型，真实接口加入时再记录用量。
-
-`ScriptedModel` 只返回固定文本，不理解输入，也不访问网络。下一章的 `FakeModel` 会进一步支持一段多轮剧本，用来检查 Agent 的控制流。
-
-## 第三步：理解三个对象
-
-一开始只需要三个概念：
-
-1. **消息**：谁说了什么。用户输入和助手输出都放进历史。
-2. **模型客户端**：接收历史，返回下一条助手消息。
-3. **停止原因**：这次输出结束，是正常完成、要调用工具，还是被截断？
-
-一次普通聊天的历史是：
-
-```text
-user: 你好
-assistant: 你好，我是 minicode。
-```
-
-下一章加入工具之后，会变成：
-
-```text
-user: 查看文件
-assistant: 请求调用 Read
-tool: 文件内容
-assistant: 根据文件内容回答
-```
-
-模型发出请求，Python 程序执行工具。模型返回了一段参数，不意味着对应操作已经发生。
-
-## 第四步：先修改实验，再接真实服务
-
-把假模型的回复改成另一句话，再运行程序。接着打印 `model.requests`，观察模型收到的是一个消息列表。
-
-在第一章，你会写消息类型和最小循环。到第三章再设置真实 API。这个顺序让循环的错误可以离线复现，不需要靠反复花钱试提示词来定位。
-
-真实服务配置使用以下环境变量：
-
-| 变量 | 含义 |
-| --- | --- |
-| `MINICODE_API` | 三种协议之一 |
-| `MINICODE_MODEL` | 服务商实际提供的模型 ID |
-| `MINICODE_BASE_URL` | API 根地址，例如以 `/v1` 结尾的地址 |
-| `MINICODE_PROVIDER` | 来源名称，用于续轮数据来源标记 |
-| `MINICODE_API_KEY` | 密钥，程序不会把它放进会话 |
-
-不自动读取 `.env`，也不在代码中保存密钥。具体协议配置在第 03–05 章给出。
-
-## 验收与排错
-
-现在只要求第 00 章实验运行成功。还可以从仓库导出本阶段的完整工作目录：
+本章代码是 [lessons/ch00.py](../lessons/ch00.py)，运行入口是 [examples/00_hello.py](../examples/00_hello.py)。想在独立目录手写，可先导出本章：
 
 ```bash
 uv run python scripts/check_tutorial.py --chapter 0 --export /tmp/minicode-ch00
+cd /tmp/minicode-ch00
+uv sync
 ```
 
-目标必须为空目录或尚不存在；导出文件中的 README 给出当前阶段的安装和运行命令。默认验收会移除仓库导入路径，并禁止导入本阶段尚未出现的包。
+导出目标须为空。接下来的命令既可在仓库根目录运行，也可在这个练习目录运行。
 
-| 现象 | 检查 |
+## 2. 最小原型：一次请求，一次回答
+
+```bash
+uv run python examples/00_hello.py --step minimal
+```
+
+你会收到模型生成的一句话。改动提示词后再次运行，回答也会改变；这里没有预先写好的答案。
+
+请求最重要的内容只有两个字段：
+
+```python
+body = {
+    "model": "你选择的模型 ID",
+    "messages": [{"role": "user", "content": "你好！"}],
+}
+```
+
+`model` 决定请求哪个模型；`messages` 记录谁说了什么。通过 HTTP 发出去，再从返回值中取出助手消息：
+
+```python
+response = client.post(base_url + "/chat/completions", json=body)
+response.raise_for_status()
+reply = response.json()["choices"][0]
+print(reply["message"]["content"])
+```
+
+`client` 是带认证头的 `httpx.Client`。完整文件把这几行放进 `ChatModel.complete()`，把环境变量和连接的建立、关闭放进 `open_chat()`。它们不决定模型回答什么。
+
+下面是可以直接复制运行的检查点。`open_chat()` 默认连接刚才配置的真实 API：
+
+```python
+# 可运行检查点：00-minimal
+from lessons.ch00 import open_chat
+
+with open_chat() as model:
+    messages = [{"role": "user", "content": "你好！请用一句话介绍你自己。"}]
+    reply = model.complete(messages)
+    print(reply["message"]["content"])
+```
+
+到这里先停下来改一次问题，确认你能解释：输入在哪里、HTTP 请求在哪里、回答从哪个字段取出来。
+
+## 3. 增强一步：让模型记住上一句话
+
+模型不会因为前一次 HTTP 请求结束，就自动记住你的对话。下一次请求要带上之前的用户消息和助手回答：
+
+```python
+# 可运行检查点：00-enhanced
+from lessons.ch00 import open_chat
+
+with open_chat() as model:
+    messages = [{"role": "user", "content": "我叫小林，请记住我的名字。"}]
+    first = model.complete(messages)
+    messages.append(first["message"])
+    messages.append({"role": "user", "content": "我叫什么名字？"})
+    second = model.complete(messages)
+    print(second["message"]["content"])
+```
+
+完整入口中的同一实验：
+
+```bash
+uv run python examples/00_hello.py --step enhanced
+```
+
+第二次请求的顺序是 `user → assistant → user`。下一章只会在这份历史里再增加“工具调用”和“工具结果”。
+
+## 4. 运行成功以后，再看失败和检查
+
+| 现象 | 从哪里检查 |
 | --- | --- |
-| `uv: command not found` | 安装 uv，并重新打开终端 |
-| Python 版本不满足要求 | 用 uv 安装或选择 Python 3.12+ |
-| `No module named minicode` | 确认在仓库根目录运行过 `uv sync --locked` |
-| 示例找不到 | 当前目录应同时包含 `docs/`、`examples/`、`pyproject.toml` |
-| 锁文件不一致 | 不手改 `uv.lock`；修改依赖后由维护者运行 `uv lock` |
+| 缺少环境变量 | 同一组 `MODEL`、`BASE_URL`、`API_KEY` 是否齐全 |
+| HTTP 401/403 | 密钥是否有效、账号是否有访问权限 |
+| HTTP 404 或模型不存在 | 根地址、模型 ID、协议是否匹配 |
+| `uv` 不存在 | 按 uv 安装说明安装后重新打开终端 |
 
-## 练习
+自动检查使用明确的离线开关；它是测试手段，不是学习前置步骤：
 
-- 把输入改为两个消息，观察假模型记录的请求。
-- 写下“模型说要读文件”和“程序读到了文件”之间还缺哪一步。
-- 解释为什么 `stop` 和输出长度达到上限不能当作同一种结束。
+```bash
+uv run python examples/00_hello.py --offline --step minimal
+uv run python examples/00_hello.py --offline --step enhanced
+uv run python -m pytest tests/test_ch00.py -q
+```
 
-下一章把这些对象串成一个能调用工具的循环。
+测试会检查实际发出的请求体，以及第二次请求是否包含完整历史。离线回复固定，不能用来评价模型能力。
+
+练习：去掉第二次请求中的第一条用户消息，再问名字；比较两次回答。你已经亲手控制了模型能看到的上下文。
+
+协议字段可查 [Chat Completions 官方接口](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create)。下一章：[让模型提出动作，让 Python 执行动作](01-agent-loop.md)。

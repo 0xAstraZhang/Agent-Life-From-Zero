@@ -1,56 +1,81 @@
-"""第 1 章独立验收，不导入未来章节。"""
-from pathlib import Path
-import subprocess
-import sys
+"""第 01 章：检查真实 wire 形状和工具结果回传，不依赖最终包。"""
+import json
 
-from lessons import ch01
+import httpx
+import pytest
 
-stage = ch01
-
-def execute(stage, model, root, max_turns=3):
-    return list(stage.run(model, "读取记录", root, max_turns))
+from lessons.ch00 import ChatModel, text_reply
+from lessons.ch01 import run, tool_reply
 
 
-def test_stage_tool_roundtrip(tmp_path):
-    (tmp_path / "record.txt").write_text("17", encoding="utf-8")
-    model = ch01.FakeModel([ch01.call("read_file", path="record.txt"), "17"])
-    events = execute(stage, model, tmp_path)
-    assert events[-1]["status"] == "success" and events[-1]["turns"] == 2
-    result = model.requests[1]["messages"][-1].content[0]
-    assert result.content == "17" and not result.is_error
-    assert result.call_id == model.requests[1]["messages"][-2].content[0].id
+def execute(replies, **kwargs):
+    requests = []
+    pending = iter(replies)
+
+    def serve(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(200, json={"choices": [next(pending)]})
+
+    with httpx.Client(transport=httpx.MockTransport(serve)) as client:
+        answer, messages = run(ChatModel(client, "fixture", "https://fixture.invalid"), "计算", **kwargs)
+    return answer, messages, requests
 
 
-
-def test_stage_missing_tool_returns_error_to_model(tmp_path):
-    model = ch01.FakeModel([ch01.call("missing"), "工具不存在"])
-    events = execute(stage, model, tmp_path)
-    assert events[0]["is_error"]
-    assert model.requests[1]["messages"][-1].content[0].is_error
-    assert events[-1]["status"] == "success"
-
-
-
-def test_stage_length_does_not_call_tools(tmp_path):
-    reply = ch01.ModelReply(ch01.Message("assistant", [ch01.call("read_file", path="record.txt")]), "length")
-    events = execute(stage, ch01.FakeModel([reply]), tmp_path)
-    assert [e["type"] for e in events] == ["result"]
-    assert events[-1]["status"] == "length"
+def test_tool_roundtrip_keeps_call_and_matching_result():
+    first = tool_reply("add", {"a": 7, "b": 8}, "addition")
+    answer, messages, requests = execute([first, text_reply("15")])
+    assert answer == "15"
+    assert requests[1]["messages"] == [
+        {"role": "user", "content": "计算"}, first["message"],
+        {"role": "tool", "tool_call_id": "addition", "content": "15"}]
+    assert messages[-1] == {"role": "assistant", "content": "15"}
+    assert requests[0]["tools"][0]["function"]["name"] == "add"
 
 
-
-def test_stage_error_and_turn_limit(tmp_path):
-    assert execute(stage, ch01.FakeModel([ConnectionError("offline")]), tmp_path)[-1]["status"] == "error"
-    events = execute(stage, ch01.FakeModel([ch01.call("missing")]), tmp_path, max_turns=1)
-    assert events[-1]["status"] == "max_turns"
-    assert events[0]["is_error"]
+def test_direct_answer_finishes_without_extra_request():
+    answer, _, requests = execute([text_reply("你好")])
+    assert answer == "你好" and len(requests) == 1
 
 
+def test_enhanced_reports_bad_arguments_and_model_can_retry():
+    _, _, requests = execute([
+        tool_reply("add", {"a": "7", "b": 8}, "bad"),
+        tool_reply("add", {"a": 7, "b": 8}, "good"), text_reply("15")], enhanced=True)
+    assert requests[1]["messages"][-1]["tool_call_id"] == "bad"
+    assert "必须是整数" in requests[1]["messages"][-1]["content"]
+    assert requests[2]["messages"][-1] == {"role": "tool", "tool_call_id": "good", "content": "15"}
 
-def test_first_stage_is_standalone_without_final_package(tmp_path):
-    source = Path(ch01.__file__).read_text()
-    script = tmp_path / "agent.py"
-    script.write_text(source)
-    result = subprocess.run([sys.executable, "-I", str(script)], cwd=tmp_path,
-                            capture_output=True, text=True, check=True)
-    assert "success" in result.stdout and "1.37" in result.stdout
+
+@pytest.mark.parametrize("enhanced", [False, True])
+def test_truncated_call_never_executes(enhanced, monkeypatch):
+    reply = tool_reply("add", {"a": 1, "b": 2})
+    reply["finish_reason"] = "length"
+    touched = []
+    monkeypatch.setattr("lessons.ch01.add", lambda request: touched.append(request))
+    monkeypatch.setattr("lessons.ch01.add_checked", lambda request: touched.append(request))
+    with pytest.raises(RuntimeError, match="尚未正常完成"):
+        execute([reply], enhanced=enhanced)
+    assert not touched
+
+
+def test_inconsistent_reply_and_repeated_id_are_explicit_errors():
+    reply = tool_reply("add", {"a": 1, "b": 2})
+    reply["finish_reason"] = "stop"
+    with pytest.raises(ValueError, match="声明回答结束"):
+        execute([reply], enhanced=True)
+    call = tool_reply("add", {"a": 1, "b": 2}, "duplicate")
+    with pytest.raises(ValueError, match="ID 重复"):
+        execute([call, call], enhanced=True)
+
+
+def test_model_turn_limit():
+    with pytest.raises(RuntimeError, match="轮数上限"):
+        execute([tool_reply("add", {"a": 1, "b": 2})], max_turns=1)
+
+
+@pytest.mark.parametrize("step", ["minimal", "enhanced"])
+def test_lesson_checkpoint_requires_actual_tool_use(step, monkeypatch):
+    from lessons import ch00, ch01
+    monkeypatch.setattr(ch01, "open_chat", lambda **kwargs: ch00.open_chat(offline=True, replies=[text_reply("5")]))
+    with pytest.raises(RuntimeError, match="需要实际调用 add"):
+        ch01.main(["--offline", "--step", step])

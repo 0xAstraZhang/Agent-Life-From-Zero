@@ -6,9 +6,29 @@
       "title": "环境与第一次交互",
       "files": {
         "examples/00_hello.py": "examples/00_hello.py",
-        "tests/test_ch00.py": "tests/test_ch00.py"
+        "tests/test_ch00.py": "tests/test_ch00.py",
+        "lessons/__init__.py": "lessons/__init__.py",
+        "lessons/ch00.py": "lessons/ch00.py"
       },
-      "example": "examples/00_hello.py"
+      "example": "examples/00_hello.py",
+      "checkpoints": [
+        {
+          "name": "minimal",
+          "args": [
+            "--offline",
+            "--step",
+            "minimal"
+          ]
+        },
+        {
+          "name": "enhanced",
+          "args": [
+            "--offline",
+            "--step",
+            "enhanced"
+          ]
+        }
+      ]
     },
     {
       "chapter": 1,
@@ -19,7 +39,25 @@
         "lessons/ch01.py": "lessons/ch01.py",
         "tests/test_ch01.py": "tests/test_ch01.py"
       },
-      "example": "examples/01_agent_loop.py"
+      "example": "examples/01_agent_loop.py",
+      "checkpoints": [
+        {
+          "name": "minimal",
+          "args": [
+            "--offline",
+            "--step",
+            "minimal"
+          ]
+        },
+        {
+          "name": "enhanced",
+          "args": [
+            "--offline",
+            "--step",
+            "enhanced"
+          ]
+        }
+      ]
     },
     {
       "chapter": 2,
@@ -29,7 +67,25 @@
         "lessons/ch02.py": "lessons/ch02.py",
         "tests/test_ch02.py": "tests/test_ch02.py"
       },
-      "example": "examples/02_tools.py"
+      "example": "examples/02_tools.py",
+      "checkpoints": [
+        {
+          "name": "minimal",
+          "args": [
+            "--offline",
+            "--step",
+            "minimal"
+          ]
+        },
+        {
+          "name": "enhanced",
+          "args": [
+            "--offline",
+            "--step",
+            "enhanced"
+          ]
+        }
+      ]
     },
     {
       "chapter": 3,
@@ -47,9 +103,29 @@
         "minicode/providers/chat.py": "lessons/stages/03/minicode/providers/chat.py",
         "minicode/providers/__init__.py": "lessons/stages/03/minicode/providers/__init__.py",
         "minicode/providers/demo.py": "lessons/stages/03/minicode/providers/demo.py",
-        "tests/test_ch03.py": "tests/test_ch03.py"
+        "tests/test_ch03.py": "tests/test_ch03.py",
+        "lessons/runtime.py": "lessons/runtime.py",
+        "tests/test_lesson_runtime.py": "tests/test_lesson_runtime.py"
       },
-      "example": "examples/03_chat_completions.py"
+      "example": "examples/03_chat_completions.py",
+      "checkpoints": [
+        {
+          "name": "minimal",
+          "args": [
+            "--offline",
+            "--step",
+            "minimal"
+          ]
+        },
+        {
+          "name": "enhanced",
+          "args": [
+            "--offline",
+            "--step",
+            "enhanced"
+          ]
+        }
+      ]
     },
     {
       "chapter": 4,
@@ -59,9 +135,30 @@
         "minicode/providers/responses.py": "lessons/stages/04/minicode/providers/responses.py",
         "minicode/providers/__init__.py": "lessons/stages/04/minicode/providers/__init__.py",
         "minicode/providers/demo.py": "lessons/stages/04/minicode/providers/demo.py",
-        "tests/test_ch04.py": "tests/test_ch04.py"
+        "tests/test_ch04.py": "tests/test_ch04.py",
+        "lessons/protocol_roundtrip.py": "lessons/protocol_roundtrip.py",
+        "lessons/wire_common.py": "lessons/wire_common.py",
+        "lessons/responses_prototype.py": "lessons/responses_prototype.py"
       },
-      "example": "examples/04_responses.py"
+      "example": "examples/04_responses.py",
+      "checkpoints": [
+        {
+          "name": "minimal",
+          "args": [
+            "--offline",
+            "--step",
+            "minimal"
+          ]
+        },
+        {
+          "name": "enhanced",
+          "args": [
+            "--offline",
+            "--step",
+            "enhanced"
+          ]
+        }
+      ]
     },
     {
       "chapter": 5,
@@ -71,9 +168,28 @@
         "minicode/providers/anthropic.py": "lessons/stages/05/minicode/providers/anthropic.py",
         "minicode/providers/__init__.py": "lessons/stages/05/minicode/providers/__init__.py",
         "minicode/providers/demo.py": "lessons/stages/05/minicode/providers/demo.py",
-        "tests/test_ch05.py": "tests/test_ch05.py"
+        "tests/test_ch05.py": "tests/test_ch05.py",
+        "lessons/anthropic_prototype.py": "lessons/anthropic_prototype.py"
       },
-      "example": "examples/05_anthropic.py"
+      "example": "examples/05_anthropic.py",
+      "checkpoints": [
+        {
+          "name": "minimal",
+          "args": [
+            "--offline",
+            "--step",
+            "minimal"
+          ]
+        },
+        {
+          "name": "enhanced",
+          "args": [
+            "--offline",
+            "--step",
+            "enhanced"
+          ]
+        }
+      ]
     },
     {
       "chapter": 6,
@@ -81,9 +197,28 @@
       "files": {
         "examples/06_coding_tools.py": "examples/06_coding_tools.py",
         "minicode/coding_tools.py": "lessons/stages/06/minicode/coding_tools.py",
-        "tests/test_coding_tools.py": "tests/test_coding_tools.py"
+        "tests/test_coding_tools.py": "tests/test_coding_tools.py",
+        "lessons/coding_prototype.py": "lessons/coding_prototype.py"
       },
-      "example": "examples/06_coding_tools.py"
+      "example": "examples/06_coding_tools.py",
+      "checkpoints": [
+        {
+          "name": "minimal",
+          "args": [
+            "--offline",
+            "--step",
+            "minimal"
+          ]
+        },
+        {
+          "name": "enhanced",
+          "args": [
+            "--offline",
+            "--step",
+            "enhanced"
+          ]
+        }
+      ]
     },
     {
       "chapter": 7,
@@ -93,7 +228,49 @@
         "minicode/permissions.py": "minicode/permissions.py",
         "tests/test_permissions.py": "tests/test_permissions.py"
       },
-      "example": "examples/07_permissions.py"
+      "example": "examples/07_permissions.py",
+      "checkpoints": [
+        {
+          "name": "minimal-deny",
+          "args": [
+            "--offline",
+            "--step",
+            "minimal",
+            "--decision",
+            "deny"
+          ]
+        },
+        {
+          "name": "minimal-allow",
+          "args": [
+            "--offline",
+            "--step",
+            "minimal",
+            "--decision",
+            "allow"
+          ]
+        },
+        {
+          "name": "enhanced-deny",
+          "args": [
+            "--offline",
+            "--step",
+            "enhanced",
+            "--decision",
+            "deny"
+          ]
+        },
+        {
+          "name": "enhanced-allow",
+          "args": [
+            "--offline",
+            "--step",
+            "enhanced",
+            "--decision",
+            "allow"
+          ]
+        }
+      ]
     },
     {
       "chapter": 8,
@@ -111,9 +288,46 @@
         "minicode/providers/demo.py": "minicode/providers/demo.py",
         "minicode/providers/__init__.py": "minicode/providers/__init__.py",
         "tests/test_streaming.py": "tests/test_streaming.py",
-        "tests/test_providers.py": "tests/test_providers.py"
+        "tests/test_providers.py": "tests/test_providers.py",
+        "lessons/streaming_prototype.py": "lessons/streaming_prototype.py",
+        "tests/test_lesson_04_08.py": "tests/test_lesson_04_08.py"
       },
-      "example": "examples/08_streaming.py"
+      "example": "examples/08_streaming.py",
+      "checkpoints": [
+        {
+          "name": "text",
+          "args": [
+            "--offline",
+            "--step",
+            "text"
+          ]
+        },
+        {
+          "name": "tools",
+          "args": [
+            "--offline",
+            "--step",
+            "tools"
+          ]
+        },
+        {
+          "name": "enhanced",
+          "args": [
+            "--offline",
+            "--step",
+            "enhanced"
+          ]
+        },
+        {
+          "name": "transport",
+          "args": [
+            "--offline",
+            "--step",
+            "transport"
+          ],
+          "offline_only": true
+        }
+      ]
     },
     {
       "chapter": 9,
@@ -121,9 +335,29 @@
       "files": {
         "examples/09_context.py": "examples/09_context.py",
         "minicode/context.py": "minicode/context.py",
-        "tests/test_context.py": "tests/test_context.py"
+        "tests/test_context.py": "tests/test_context.py",
+        "lessons/ch09.py": "lessons/ch09.py",
+        "tests/test_lesson_09.py": "tests/test_lesson_09.py"
       },
-      "example": "examples/09_context.py"
+      "example": "examples/09_context.py",
+      "checkpoints": [
+        {
+          "name": "minimal",
+          "args": [
+            "--offline",
+            "--step",
+            "minimal"
+          ]
+        },
+        {
+          "name": "enhanced",
+          "args": [
+            "--offline",
+            "--step",
+            "enhanced"
+          ]
+        }
+      ]
     },
     {
       "chapter": 10,
@@ -136,9 +370,45 @@
         "minicode/compact.py": "lessons/stages/10/minicode/compact.py",
         "tests/test_session.py": "tests/test_session.py",
         "tests/test_compact.py": "tests/test_compact.py",
-        "tests/test_core.py": "tests/test_core.py"
+        "tests/test_core.py": "tests/test_core.py",
+        "lessons/ch10.py": "lessons/ch10.py",
+        "tests/test_lesson_10.py": "tests/test_lesson_10.py"
       },
-      "example": "examples/10_sessions.py"
+      "example": "examples/10_sessions.py",
+      "checkpoints": [
+        {
+          "name": "minimal",
+          "args": [
+            "--offline",
+            "--step",
+            "minimal"
+          ]
+        },
+        {
+          "name": "enhanced",
+          "args": [
+            "--offline",
+            "--step",
+            "enhanced"
+          ]
+        },
+        {
+          "name": "compact",
+          "args": [
+            "--offline",
+            "--step",
+            "compact"
+          ]
+        },
+        {
+          "name": "compact-enhanced",
+          "args": [
+            "--offline",
+            "--step",
+            "compact-enhanced"
+          ]
+        }
+      ]
     },
     {
       "chapter": 11,
@@ -148,9 +418,45 @@
         "minicode/hooks.py": "minicode/hooks.py",
         "tests/test_hooks.py": "tests/test_hooks.py",
         "minicode/planning.py": "minicode/planning.py",
-        "tests/test_planning.py": "tests/test_planning.py"
+        "tests/test_planning.py": "tests/test_planning.py",
+        "lessons/ch11.py": "lessons/ch11.py",
+        "tests/test_lesson_11.py": "tests/test_lesson_11.py"
       },
-      "example": "examples/11_hooks_planning.py"
+      "example": "examples/11_hooks_planning.py",
+      "checkpoints": [
+        {
+          "name": "minimal",
+          "args": [
+            "--offline",
+            "--step",
+            "minimal"
+          ]
+        },
+        {
+          "name": "enhanced",
+          "args": [
+            "--offline",
+            "--step",
+            "enhanced"
+          ]
+        },
+        {
+          "name": "todo",
+          "args": [
+            "--offline",
+            "--step",
+            "todo"
+          ]
+        },
+        {
+          "name": "todo-enhanced",
+          "args": [
+            "--offline",
+            "--step",
+            "todo-enhanced"
+          ]
+        }
+      ]
     },
     {
       "chapter": 12,
@@ -158,9 +464,29 @@
       "files": {
         "examples/12_subagents.py": "examples/12_subagents.py",
         "minicode/subagents.py": "lessons/stages/12/minicode/subagents.py",
-        "tests/test_subagents.py": "tests/test_subagents.py"
+        "tests/test_subagents.py": "tests/test_subagents.py",
+        "lessons/ch12.py": "lessons/ch12.py",
+        "tests/test_lesson_12.py": "tests/test_lesson_12.py"
       },
-      "example": "examples/12_subagents.py"
+      "example": "examples/12_subagents.py",
+      "checkpoints": [
+        {
+          "name": "minimal",
+          "args": [
+            "--offline",
+            "--step",
+            "minimal"
+          ]
+        },
+        {
+          "name": "enhanced",
+          "args": [
+            "--offline",
+            "--step",
+            "enhanced"
+          ]
+        }
+      ]
     },
     {
       "chapter": 13,
@@ -168,9 +494,29 @@
       "files": {
         "examples/13_skills.py": "examples/13_skills.py",
         "minicode/skills.py": "minicode/skills.py",
-        "tests/test_skills.py": "tests/test_skills.py"
+        "tests/test_skills.py": "tests/test_skills.py",
+        "lessons/ch13.py": "lessons/ch13.py",
+        "tests/test_lesson_13.py": "tests/test_lesson_13.py"
       },
-      "example": "examples/13_skills.py"
+      "example": "examples/13_skills.py",
+      "checkpoints": [
+        {
+          "name": "minimal",
+          "args": [
+            "--offline",
+            "--step",
+            "minimal"
+          ]
+        },
+        {
+          "name": "enhanced",
+          "args": [
+            "--offline",
+            "--step",
+            "enhanced"
+          ]
+        }
+      ]
     },
     {
       "chapter": 14,
@@ -179,9 +525,29 @@
         "examples/14_mcp.py": "examples/14_mcp.py",
         "minicode/mcp.py": "minicode/mcp.py",
         "examples/mcp_demo_server.py": "examples/mcp_demo_server.py",
-        "tests/test_mcp.py": "tests/test_mcp.py"
+        "tests/test_mcp.py": "tests/test_mcp.py",
+        "lessons/ch14.py": "lessons/ch14.py",
+        "tests/test_lesson14.py": "tests/test_lesson14.py"
       },
-      "example": "examples/14_mcp.py"
+      "example": "examples/14_mcp.py",
+      "checkpoints": [
+        {
+          "name": "minimal",
+          "args": [
+            "--offline",
+            "--step",
+            "minimal"
+          ]
+        },
+        {
+          "name": "enhanced",
+          "args": [
+            "--offline",
+            "--step",
+            "enhanced"
+          ]
+        }
+      ]
     },
     {
       "chapter": 15,
@@ -191,9 +557,29 @@
         "minicode/budget.py": "lessons/stages/15/minicode/budget.py",
         "tests/test_budget.py": "tests/test_budget.py",
         "minicode/evals.py": "minicode/evals.py",
-        "tests/test_evals.py": "tests/test_evals.py"
+        "tests/test_evals.py": "tests/test_evals.py",
+        "lessons/ch15.py": "lessons/ch15.py",
+        "tests/test_lesson15.py": "tests/test_lesson15.py"
       },
-      "example": "examples/15_evals.py"
+      "example": "examples/15_evals.py",
+      "checkpoints": [
+        {
+          "name": "minimal",
+          "args": [
+            "--offline",
+            "--step",
+            "minimal"
+          ]
+        },
+        {
+          "name": "enhanced",
+          "args": [
+            "--offline",
+            "--step",
+            "enhanced"
+          ]
+        }
+      ]
     },
     {
       "chapter": 16,
@@ -203,9 +589,29 @@
         "minicode/cli.py": "lessons/stages/16/minicode/cli.py",
         "minicode/__main__.py": "minicode/__main__.py",
         "tests/test_app.py": "tests/test_app.py",
-        "tests/test_provider_config.py": "lessons/stages/16/tests/test_provider_config.py"
+        "tests/test_provider_config.py": "lessons/stages/16/tests/test_provider_config.py",
+        "lessons/ch16.py": "lessons/ch16.py",
+        "tests/test_lesson16.py": "tests/test_lesson16.py"
       },
-      "example": "examples/16_shipping.py"
+      "example": "examples/16_shipping.py",
+      "checkpoints": [
+        {
+          "name": "minimal",
+          "args": [
+            "--offline",
+            "--step",
+            "minimal"
+          ]
+        },
+        {
+          "name": "enhanced",
+          "args": [
+            "--offline",
+            "--step",
+            "enhanced"
+          ]
+        }
+      ]
     },
     {
       "chapter": 17,
@@ -214,9 +620,27 @@
         "examples/17_sandbox.py": "examples/17_sandbox.py",
         "minicode/sandbox.py": "lessons/stages/17/minicode/sandbox.py",
         "minicode/cli.py": "lessons/stages/17/minicode/cli.py",
-        "tests/test_sandbox.py": "tests/test_sandbox.py"
+        "tests/test_sandbox.py": "tests/test_sandbox.py",
+        "lessons/ch17.py": "lessons/ch17.py",
+        "tests/test_lesson17.py": "tests/test_lesson17.py"
       },
-      "example": "examples/17_sandbox.py"
+      "example": "examples/17_sandbox.py",
+      "checkpoints": [
+        {
+          "name": "minimal",
+          "args": [
+            "--step",
+            "minimal"
+          ]
+        },
+        {
+          "name": "enhanced",
+          "args": [
+            "--step",
+            "enhanced"
+          ]
+        }
+      ]
     },
     {
       "chapter": 18,
@@ -261,9 +685,61 @@
         "tests/test_provider_config.py": "tests/test_provider_config.py",
         "tests/test_request_reliability.py": "tests/test_request_reliability.py",
         "tests/test_runtime_controls.py": "tests/test_runtime_controls.py",
-        "tests/test_tool_sessions.py": "tests/test_tool_sessions.py"
+        "tests/test_tool_sessions.py": "tests/test_tool_sessions.py",
+        "lessons/ch18.py": "lessons/ch18.py",
+        "tests/test_lesson18.py": "tests/test_lesson18.py"
       },
-      "example": "examples/18_runtime.py"
+      "example": "examples/18_runtime.py",
+      "checkpoints": [
+        {
+          "name": "minimal",
+          "args": [
+            "--offline",
+            "--step",
+            "minimal"
+          ]
+        },
+        {
+          "name": "retry",
+          "args": [
+            "--offline",
+            "--step",
+            "retry"
+          ]
+        },
+        {
+          "name": "deadline",
+          "args": [
+            "--offline",
+            "--step",
+            "deadline"
+          ]
+        },
+        {
+          "name": "context",
+          "args": [
+            "--offline",
+            "--step",
+            "context"
+          ]
+        },
+        {
+          "name": "processes",
+          "args": [
+            "--offline",
+            "--step",
+            "processes"
+          ]
+        },
+        {
+          "name": "enhanced",
+          "args": [
+            "--offline",
+            "--step",
+            "enhanced"
+          ]
+        }
+      ]
     }
   ]
 }

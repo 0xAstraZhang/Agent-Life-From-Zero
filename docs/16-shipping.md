@@ -1,139 +1,156 @@
-# 第 16 章：组装 CLI 并交付
+# 第 16 章：从一个 main 函数做成命令行程序
 
-上一章：[评测](15-evals.md) · [目录](README.md) · 下一章：[沙箱](17-sandbox.md)
+上一章：[评测](15-evals.md) · 下一章：[沙箱](17-sandbox.md)
 
-## 这一章的结果
-
-这一章把前面独立验证的组件接成可安装的程序。本章的入口是 [cli.py](../lessons/stages/16/minicode/cli.py)，包配置在 [pyproject.toml](../pyproject.toml)。第 17 章增加沙箱参数，第 18 章再增加模型和运行控制；最终版本见 [minicode/cli.py](../minicode/cli.py)。CLI 负责读配置、组装组件和显示事件，不复制 Agent Loop。
-
-本章新增 `cli.py`、`__main__.py`、控制台入口和 CLI 测试；保留第 15 章以前的全部模块。完整累积目录可在仓库根目录导出：
+先让终端中的一句话进入已有 Agent，并把结果打印回来。本章第一版只做这件事，再增加交互、配置选项和安装包。
 
 ```bash
 uv run python scripts/check_tutorial.py --chapter 16 --export /tmp/minicode-ch16
+cd /tmp/minicode-ch16
+uv sync
+uv run python examples/16_shipping.py --step minimal -p "用 Glob 列出 Python 文件"
 ```
 
-进入导出目录后运行 `uv sync` 安装本阶段程序，再执行以下命令。前面章节不会安装这个尚未实现的 CLI 入口。
+API 配置沿用[第 00 章](00-setup.md)。完整练习在 [lessons/ch16.py](../lessons/ch16.py)；完整 CLI 的本章版本在 [阶段 cli.py](../lessons/stages/16/minicode/cli.py)。
 
-## 第一步：检查最终依赖方向
+## 1. 写一个最小入口
+
+把下面的完整程序保存为本章目录中的 `mycli.py`。`open_model()` 复用前面已经建立的真实 API 配置；`--offline` 只用于回归。
+
+```python
+import argparse
+from pathlib import Path
+
+from lessons.runtime import open_model, print_event
+from minicode.agent import Agent
+from minicode.coding_tools import build_coding_tools
+from minicode.permissions import PermissionRunner
+from minicode.testing import call
+from minicode.tool import ToolContext, ToolRunner
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-p", "--prompt", required=True)
+    parser.add_argument("--api", default="openai-chat")
+    parser.add_argument("--offline", action="store_true")
+    args = parser.parse_args()
+    script = [call("Glob", pattern="*.py"), "已列出 Python 文件。"]
+    with open_model(args, script) as model:
+        tools = build_coding_tools(include_bash=False)
+        runner = PermissionRunner(ToolRunner(tools, ToolContext(Path.cwd())), read_only=True)
+        for event in Agent(model, runner, max_turns=6).run(args.prompt):
+            print_event(event)
+            if event["type"] == "result":
+                status = event["status"]
+    return 0 if status == "success" else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+```
+
+运行：
+
+```bash
+uv run python mycli.py -p "用 Glob 列出 Python 文件"
+```
+
+沿着五步读代码：解析任务 → 创建模型 → 组装工具 → 运行 Agent → 显示事件。CLI 没有复制工具循环。只读执行层沿用第 07 章的实现。
+
+## 2. 先增加一个确实需要的选项
+
+第一次扩展只添加 `--cwd`。在解析参数时加入：
+
+```python
+parser.add_argument("--cwd", type=Path, default=Path.cwd())
+```
+
+创建 `ToolContext` 时用 `args.cwd.expanduser().resolve()` 代替 `Path.cwd()`。运行同一个 prompt、传入不同目录，观察工具结果如何变化。[最小检查点](../lessons/ch16.py)已经包含这项扩展，也会检查目录是否存在：
+
+```bash
+uv run python examples/16_shipping.py --step minimal --cwd . -p "列出 Python 文件"
+```
+
+`--api`、`--model` 等参数也按同样方法传给模型配置，不能把服务商判断放进 Agent Loop。
+
+## 3. 增强检查点：接回已有组件
+
+```bash
+uv run python examples/16_shipping.py --step enhanced -p "查看项目结构并总结"
+```
+
+增强检查点调用本阶段完整 CLI，以只读模式运行同一个任务。现在再读 [cli.py](../lessons/stages/16/minicode/cli.py)，按功能逐组扩展自己的 `main()`：
+
+| 从最小版遇到的需求 | 增加什么 |
+| --- | --- |
+| 连续输入多个任务 | 输入循环，`exit`/`quit` 结束 |
+| 调整连接方式 | 环境变量默认值，命令行覆盖 |
+| 显示生成过程 | `--stream` 选择模型流，`--json` 选择显示格式 |
+| 保留进度 | `--session` 和 `--resume` 调用已有会话层 |
+| 使用已有扩展 | 注册计划、Skill、Delegate 和 MCP 工具 |
+| 正常或异常退出都释放资源 | 用 `ExitStack` 管理模型和子进程 |
+
+完整调用方向仍然是：
 
 ```text
-CLI
- ├─ ModelConfig → 三协议工厂 → HTTPModel
- │                 ↑ BudgetModel ↑ CompactingModel
- ├─ ToolRunner ← 文件工具 / 计划 / Skills / MCP / 只读委派
- │     ↑ PermissionRunner（共享 Approval）
- └─ Agent → 统一 Message 和结果事件
-       ↑ run_session（保存完整历史）
+CLI → 创建 model 与 runner → Agent → 事件显示
+          ↓                     ↑
+      预算 / 压缩              会话层
 ```
 
-没有 `if anthropic` 出现在 Agent、权限或会话里。只有工厂按 `api` 选择适配器。`provider`、`model`、`base_url` 是配置数据；同一个服务商可以提供多种协议。
+组装时保留同一个审批对象和工具状态。非交互的 `-p` 没有审批回调，需要写操作时显式配置 `--allow-tool`；`--read-only` 始终优先。Bash 的操作系统隔离在下一章实现。
 
-## 第二步：配置和组装
+## 4. 注册可安装的命令
 
-CLI 从环境变量读取默认模型配置，命令行参数可以覆盖它：
-
-| 参数 | 用途 |
-| --- | --- |
-| `--api`、`--model`、`--base-url`、`--provider` | 模型协议与来源 |
-| `--api-key-env` | 指定读取密钥的环境变量名，不接收明文密钥参数 |
-| `--cwd` | 文件工具和命令的工作目录 |
-| `--max-turns`、`--token-budget`、`--max-output-tokens` | 轮数、累计软预算、单次输出上限 |
-| `--chat-token-field` | Chat 协议的输出上限字段：`max_tokens` 或 `max_completion_tokens` |
-| `--read-only`、`--allow-tool` | 只读限制、显式工具授权 |
-| `--stream`、`--json` | 模型流式输出、逐行 JSON 运行事件 |
-| `--session`、`--resume` | 保存和恢复会话 |
-| `--instructions`、`--skills`、`--subagents` | 项目说明、技能目录、只读委派 |
-| `--mcp-command` | 显式启动一个 stdio MCP 服务 |
-
-`--json` 只是事件的输出格式；`--stream` 才决定是否向服务端请求 SSE。两者可以独立使用。
-
-`--provider deepseek` 默认选择 `max_tokens`，其他来源保留 OpenAI 的 `max_completion_tokens`；显式 `--chat-token-field` 优先。字段选择只在模型配置和适配器边界处理，不进入 Agent。环境变量 `MINICODE_CHAT_TOKEN_FIELD` 也可以设置该选项。
-
-CLI 用 `ExitStack` 管理 HTTP 客户端和 MCP 子进程的生命周期，正常退出、配置异常和用户中断都经过同一条清理路径。
-
-## 第三步：先验收离线入口
-
-```bash
-uv run minicode --help
-uv run minicode --demo
-uv run minicode --demo --stream --json
-uv run python examples/16_shipping.py
-```
-
-`--demo` 运行固定剧本：Glob → 工具结果 → 最终回答。它不理解任意任务，也不请求真实模型；它用来验证配置、组装、事件输出是否接通。
-
-JSON 模式中应依次看见 `assistant`、`tool_result`、`assistant`、`result`。离线 demo 开启 `--stream` 后还会出现文本增量；工具参数增量在第 08 章的三个协议实验中观察。最终结果仍然只有一个。
-
-## 第四步：交互与非交互
-
-配置真实模型后：
-
-```bash
-uv run minicode
-uv run minicode --read-only -p "查看项目结构并总结"
-uv run minicode --allow-tool Edit -p "阅读 answer.py，将错误的常量改正并说明依据"
-```
-
-交互模式读终端输入，用户输入 `exit` 或 `quit` 退出。`-p` 模式没有审批回调：需要授权的工具默认拒绝，只有显式允许的工具名例外。`--read-only` 的限制优先于 allow 列表。
-
-程序退出码：成功为 0，任务未成功为 1，配置或外层运行错误为 2，外层键盘中断为 130。具体任务停止原因仍保留在 `result.status` 中。
-
-文件工具会核对工作目录与符号链接，但 Bash 是普通子进程，不能提供 OS 沙箱。[第 17 章](17-sandbox.md)在 Linux 上用 bubblewrap 为 Bash 加一层隔离；无人值守地运行不可信项目时，仍需要另外配置容器或系统隔离。
-
-## 第五步：保存和恢复
-
-```bash
-uv run minicode --session .minicode/work.jsonl
-uv run minicode --session .minicode/work.jsonl --resume
-```
-
-已有会话必须明确使用 `--resume`，避免意外覆盖。恢复加载内部消息，缺失的工具结果补为“结果未知”，不会自动再次执行写入。CLI、会话和模型适配器仍各自只处理自己的边界。
-
-默认保留会话中的应用说明。如果本次显式选择 `--instructions` 或 `--skills`，CLI 按当前配置重新构建 system 消息，保留用户、助手和工具历史。需要继续保留的自定义说明与技能目录应在本次参数中一并指定。
-
-开启不同模型或协议后，适配器只重用来源匹配且内部内容未被编辑的原始续轮数据。文本与工具历史可以转换；专属推理状态不保证能跨模型延续。
-
-## 第六步：构建安装包
-
-```bash
-uv build
-```
-
-构建得到 wheel 和源代码包。项目的命令行声明是：
+先有可以运行的 `main()`，再在 `pyproject.toml` 声明入口：
 
 ```toml
 [project.scripts]
 minicode = "minicode.cli:main"
 ```
 
-可以在新环境中安装 wheel，确认没有依赖源码目录：
+控制台命令只是调用这个函数。可以从同一个包分别运行：
 
 ```bash
+uv run python -m minicode --help
+uv run minicode --help
+uv run minicode --read-only -p "查看项目结构并总结"
+```
+
+前面的阶段没有这项控制台声明，所以本章之前的真实实验都使用 Python 入口。
+
+## 5. 最后补配置和退出细节
+
+完整 CLI 区分三类配置：模型连接，Agent 的轮数与预算，应用的显示与扩展。用 `uv run minicode --help` 查阅完整参数，不需要一次记住。
+
+- 密钥从指定环境变量读取，不作为命令行明文参数。
+- `--stream` 决定是否请求 SSE；`--json` 决定事件怎样显示。
+- 已存在的会话文件需要 `--resume`，缺失的工具结果记为未知，不重做写操作。
+- `--provider` 与 `--api` 分开；协议选择发生在模型工厂。
+- 成功退出码为 0，任务未完成为 1，配置错误为 2，外层键盘中断为 130。
+
+恢复历史时，应用说明按当前显式配置处理；服务商原始续轮数据只在来源匹配时重用。逐项阅读实现并测试这些条件，不把它们塞回最初的 `main()` 示例。
+
+## 6. 构建并在新环境检查
+
+```bash
+uv build
 uv venv /tmp/minicode-clean
 uv pip install --python /tmp/minicode-clean/bin/python dist/agent_life_from_zero-0.2.0-py3-none-any.whl
 /tmp/minicode-clean/bin/minicode --help
 /tmp/minicode-clean/bin/minicode --demo
 ```
 
-这里的临时目录命令适用于 macOS/Linux；Windows 使用对应虚拟环境的 `Scripts` 路径。实际发布前还应在目标系统验证命令执行与子进程中断。
+这里使用 macOS/Linux 的路径；Windows 对应虚拟环境的 `Scripts` 目录。安装包验证用固定 demo，真实效果继续用前面的 API 任务检查。
 
-## 发布前的验收
+## 验收
 
 ```bash
-uv run python -m pytest -q
-uv run python scripts/check_tutorial.py
-uv run python -m minicode.evals
+uv run python examples/16_shipping.py --step minimal --offline
+uv run python examples/16_shipping.py --step enhanced --offline
+uv run python -m pytest tests/test_lesson16.py tests/test_app.py tests/test_provider_config.py -q
 uv build
 ```
 
-同时完成一次有记录的真实模型检查。离线检查不请求模型服务，不能代替在线协议兼容性、账户可用性和模型任务效果验证。
-
-其中 `scripts/check_tutorial.py` 在原教程仓库运行，用来验收所有阶段；导出的第 16 章工作目录按其 README 运行累计测试和当前实验即可。
-
-README 应包含：安装命令、三协议配置、离线示例、真实请求方式、权限行为、检查命令和实现范围。本仓库的 [README](../README.md) 就是对应成品。
-
-## 完成后的扩展方向
-
-现在的系统已经有完整的“接收任务 → 请求模型 → 校验并执行工具 → 回传结果 → 验证并停止”路径。
-
-下一章先为 Bash 加上 Linux 沙箱。之后可以继续选择一个真实需求扩展：图片工具结果、跨平台沙箱、写任务的独立工作树、流式重连或远程 MCP。每增加一种能力，都先决定它属于哪一层，再增加行为测试。新增模型协议仍不应要求复制主循环。
+发布前再从原教程仓库运行全部测试与 `scripts/check_tutorial.py`。给 README 写清安装、真实 API 配置、基本任务、权限与恢复方式。先让别人完成一个任务，再介绍扩展参数。

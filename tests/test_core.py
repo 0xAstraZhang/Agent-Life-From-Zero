@@ -1,7 +1,3 @@
-import copy
-import importlib.util
-from pathlib import Path
-
 import pytest
 
 from minicode.agent import Agent
@@ -127,13 +123,13 @@ def test_persistence_keeps_internal_content_and_opaque_metadata():
         message_from_dict({"role": "user", "content": [{"type": "tool_call"}]})
 
 
-def test_chapter01_snapshot_still_works(tmp_path):
-    path = Path(__file__).resolve().parents[1] / "examples" / "01_agent_loop.py"
-    spec = importlib.util.spec_from_file_location("chapter01", path)
-    chapter = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(chapter)
-    (tmp_path / "data.txt").write_text("17", encoding="utf-8")
-    model = FakeModel([call("read_file", path="data.txt"), "17"])
-    events = list(chapter.run(model, "读数", tmp_path))
-    assert events[-1]["status"] == "success" and events[-1]["turns"] == 2
-    assert model.requests[1]["messages"][-1].content[0].content == "17"
+def test_chapter01_snapshot_keeps_the_same_tool_result_contract():
+    from lessons.ch00 import open_chat, text_reply
+    from lessons.ch01 import run, tool_reply
+
+    with open_chat(offline=True, replies=[tool_reply("add", {"a": 8, "b": 9}), text_reply("17")]) as model:
+        answer, history = run(model, "调用 add 计算 8 加 9")
+    assert answer == "17"
+    assert [message["role"] for message in history] == ["user", "assistant", "tool", "assistant"]
+    assert history[2]["content"] == "17"
+    assert history[2]["tool_call_id"] == history[1]["tool_calls"][0]["id"]

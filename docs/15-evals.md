@@ -1,149 +1,122 @@
-# 第 15 章：评测、用量与失败分类
+# 第 15 章：让程序检查 Agent 是否做成了任务
 
-上一章：[MCP](14-mcp.md) · [目录](README.md) · 下一章：[交付](16-shipping.md)
+上一章：[MCP](14-mcp.md) · 下一章：[交付](16-shipping.md)
 
-## 本章的完整累积目录
-
-导出只包含第 00–15 章文件的工作目录，再在里面运行示例和本章测试：
+本章先只评测一个真实任务：文件里是 `answer = 41`，让 Agent 改成 `answer = 42`，由独立代码检查文件。先把“任务 → 运行 → 验收”做通，再增加预算、任务集合和失败分类。
 
 ```bash
 uv run python scripts/check_tutorial.py --chapter 15 --export /tmp/minicode-ch15
 cd /tmp/minicode-ch15
 uv sync
-uv run python -m pytest tests -q
+uv run python examples/15_evals.py --step minimal
 ```
 
-目标必须是新目录或空目录。导出目录的 README 列出本章新增、替换的完整文件和实验命令。这些文件可直接编辑；隔离验收会阻止它从原仓库加载尚未学习的模块。
+真实 API 配置沿用[第 00 章](00-setup.md)。本章直接使用 Python 入口，不依赖下一章才创建的 CLI。完整文件是 [lessons/ch15.py](../lessons/ch15.py)。
 
-## 这一章的结果
+## 1. 先写验收条件
 
-到这里，模型可以通过三个协议使用同一套工具，还能保存会话和委派调查。现在需要回答：任务到底做成了吗？失败发生在协议、执行器，还是模型选择？下一次请求是否会超过可接受的用量？
-
-本章新增 [evals.py](../minicode/evals.py)、[budget.py](../lessons/stages/15/minicode/budget.py)，实验是 [15_evals.py](../examples/15_evals.py)，验收见 [预算测试](../tests/test_budget.py)和[任务验收](../tests/test_evals.py)。
-
-## 第一步：把完成条件写成可检查的结果
-
-模型说“已经修改”不等于文件真的修改。一次修改任务至少检查三件事：
-
-1. 终止事件的 `status` 是否符合预期。
-2. 工具是否返回错误，错误是否符合该任务的预期。
-3. 文件内容或程序行为是否真的达到目标。
-
-实验准备一个临时目录，写入 `answer = 41`，然后用固定剧本调用 Read、Edit，最后检查文件是不是 `answer = 42`。
+实验在临时目录里创建一份文件：
 
 ```python
-model = FakeModel([
-    call("Read", path="answer.py"),
-    call("Edit", path="answer.py", old="41", new="42"),
-    "完成",
-])
+target = root / "answer.py"
+target.write_text("answer = 41\n", encoding="utf-8")
 ```
 
-这里允许 Edit，但不允许 Write 或 Bash。这样的权限设置使测试只验证需要的操作。实验结束后临时目录自动清理。
-
-另两个任务分别检查拒绝写入和未知工具。它们的成功标准包含“错误被回传”和“文件没有产生”，而不是要求每次工具都成功。
-
-```bash
-uv run python examples/15_evals.py
-```
-
-预期报告含三项：
-
-```json
-[
-  {"task": "read_then_edit", "passed": true, "tool_errors": 0},
-  {"task": "deny_write", "passed": true, "tool_errors": 1},
-  {"task": "unknown_tool", "passed": true, "tool_errors": 1}
-]
-```
-
-这三项验证 harness 的执行链。FakeModel 没有推理能力，所以这些结果不能当成真实模型的任务成功率。
-
-## 第二步：把测试分成三层
-
-| 层次 | 输入 | 验证什么 |
-| --- | --- | --- |
-| 内核测试 | FakeModel | 循环出口、错误回传、权限、中断恢复 |
-| 协议契约测试 | MockTransport 与 SSE 事件 | 三种请求格式、响应转换、调用 ID、原始续轮数据 |
-| 任务评测 | 真实模型与隔离工作目录 | 能否读懂任务、选择工具、修改并验证 |
-
-同一层测试不能代替另一层。协议 fixture 全部通过，仍然需要一次真实服务检查；真实模型碰巧做对一次，也不能证明流断开时不会错误执行工具。
-
-```bash
-uv run python -m pytest -q
-uv run python scripts/check_tutorial.py
-```
-
-第二条还会运行每章实验和核对本地 Markdown 链接，确保文档中的入口没有悄悄断开。
-
-## 第三步：在模型边界累计用量
-
-第 12 章按请求次数限制委派。这里进一步按服务商返回的 token 用量累计，预算对象与模型实例分开，可以给父子 Agent 共用。
+目标是文件内容准确变成下面这样：
 
 ```python
-from minicode.budget import Budget, BudgetModel
-
-budget = Budget(token_limit=50_000)
-model = BudgetModel(base_model, budget)
+file_passed = target.read_text(encoding="utf-8") == "answer = 42\n"
 ```
 
-`BudgetModel.complete()` 的顺序是：检查累计用量 → 请求模型 → 累计本次用量 → 返回原来的 `ModelReply`。
+这个判断在 Agent 运行结束后执行。它不看模型是否说了“完成”，而是直接读取实际产物。
 
-流式模式在 `done` 事件上累计一次，不按 delta 重复计数。压缩模型也放在预算包装器外面，它产生的摘要请求会经过同一个预算边界。
+## 2. 让真实 Agent 尝试任务
+
+沿用前面的工具和权限，只允许本次需要的 Edit：
+
+```python
+runner = PermissionRunner(
+    ToolRunner(build_coding_tools(include_bash=False), ToolContext(root)), allowed=["Edit"])
+events = list(Agent(model, runner, max_turns=6).run(
+    "先读取 answer.py，再用 Edit 将 answer 的值从 41 改成 42，其他内容保持原样。"))
+final = events[-1]
+file_passed = target.read_text(encoding="utf-8") == "answer = 42\n"
+report = {
+    "status": final["status"],
+    "file_passed": file_passed,
+    "passed": final["status"] == "success" and file_passed,
+}
+```
+
+`status` 回答“Agent 是否正常结束”，`file_passed` 回答“任务是否做成”。两个条件都满足才算通过。工具中途出错、随后正确重试并完成任务，不必自动判整项失败。
+
+运行最小检查点后应看到包含 `passed` 的 JSON 报告。真实模型可能失败；先看最后的文件与事件，再决定原因。修改任务目标和验收条件，重新做一次。
+
+## 3. 增强检查点：给同一个任务加用量预算
+
+```bash
+uv run python examples/15_evals.py --step enhanced
+```
+
+只把模型换成预算包装器，保留刚才的任务和验收函数：
+
+```python
+budget = Budget(token_limit=10_000)
+model = BudgetModel(model, budget)
+report = evaluate(model, root)
+```
+
+[阶段 budget.py](../lessons/stages/15/minicode/budget.py)的非流式逻辑是：
+
+```python
+def complete(self, messages, tools=()):
+    self.budget.check()
+    reply = self.inner.complete(messages, tools)
+    self.budget.record(reply.usage)
+    return reply
+```
+
+现在再解释它的限制：这是下一次请求前的软上限，当前请求可能超额；缺少 usage 的请求不能恢复完整账单。流式结果在最终 `done` 上累计一次。父子 Agent 共用一个预算对象，摘要请求也经过预算边界：
 
 ```text
 CompactingModel → BudgetModel → 协议适配器
 ```
 
-这个预算是**下一次请求前的软上限**：当前请求结束时可能超限；断流且没有 usage 时也无法得知完整账单。它不承诺硬性美元封顶。若要换算费用，需要显式配置对应模型、缓存、输入输出的价格，并记录核对日期，不能给所有模型写同一个默认价格。
+## 4. 从一个任务扩展到一组任务
 
-CLI 使用 `--token-budget`，`--max-output-tokens` 控制单次请求的输出上限，`--max-turns` 控制当前任务的循环轮数。
+先把输入、目标和验收函数从 `evaluate()` 中提成参数，再逐项运行。每项使用独立的初始目录，避免上一项修改影响下一项。
 
-JSON 终止事件的 `usage` 是当前 Agent 观测到的用量，`budget_usage` 是本次进程中父子 Agent 共用预算的累计用量。恢复会话不会把上一次进程的用量当成这次运行的预算。
-
-## 第四步：设计一组真实任务
-
-在线评测前，在独立副本或容器里创建小任务，每项都写清楚初始状态、允许工具、验收函数和上限。例如：
-
-| 任务 | 验收 |
+| 任务 | 独立验收 |
 | --- | --- |
-| 定位一个函数的调用位置 | 返回的路径与行号存在，说明与代码相符 |
-| 修复一个边界条件 | 原有测试和新增的失败用例通过 |
-| 修改配置中的一个值 | 指定字段变化，其他字段保持不变 |
-| 操作被拒绝 | 未产生对应副作用，报告拒绝原因 |
-| 文件被外部修改 | 旧内容校验阻止覆盖，模型重新读取 |
+| 修改一个常量 | 指定文件内容符合预期 |
+| 查找函数调用 | 返回的路径和行号确实存在 |
+| 修复一个错误 | 原有测试和复现错误的用例通过 |
+| 写入被拒绝 | 对应文件没有产生，结果说明了拒绝 |
 
-对每个协议使用支持函数工具的实际模型。记录日期、模型 ID、base URL、任务版本和运行参数；每项重复几次，将波动单独报告。
+重复执行真实任务，记录模型、协议、任务版本和参数，再统计通过率。固定剧本只证明评测程序接线正确，不能作为模型成功率。
 
-先运行一个只读 smoke test，再决定是否开启写工具：
+[evals.py](../minicode/evals.py)提供三个确定的离线回归案例：正常编辑、拒绝写入和未知工具。掌握真实任务的验收后，再用这些剧本检查验收程序是否会被一句“完成”误导。
 
-```bash
-uv run minicode --read-only --max-turns 5 --token-budget 10000 -p "阅读 README，列出三个支持的协议"
-```
+## 5. 再把失败分开
 
-这会请求真实服务，需要先设置第 03–05 章的环境变量。
+| 结果 | 含义 |
+| --- | --- |
+| `success` 但验收失败 | 模型结束了任务，实际目标没有达成 |
+| `max_turns` | 没在限定轮数内结束 |
+| `length` | 输出截断，不能执行半成品调用 |
+| `refusal` | 模型拒绝，不是网络故障 |
+| `error` | 继续查看认证、传输、协议或执行器错误 |
+| `cancelled` | 任务被中断，检查未完成调用的状态 |
 
-## 第五步：按失败来源统计
-
-- `length`：输出被截断；不能计为完成，也不能执行残缺的工具调用。
-- `refusal`：模型拒绝，不应当作网络故障重试。
-- `error`：查看是认证、HTTP、协议解析还是执行器失败。
-- `max_turns`：工具循环没有在限制内结束。
-- `cancelled`：用户中断，未完成调用的结果被记录为未知。
-- `success` 但验收不通过：模型结束了任务，但目标没有达成。
-
-保存事件时注意工具结果可能含项目内容。会话目录被 `.gitignore` 排除；向别人分享评测记录前，按任务需要删去密钥和私人数据。
+内核测试、协议测试与真实任务评测各自验证不同内容。最终费用记录在[第 18 章](18-runtime.md)加入；这里先累计服务商返回的 token。
 
 ## 验收与练习
 
 ```bash
-uv run python -m pytest tests/test_budget.py tests/test_evals.py -q
+uv run python examples/15_evals.py --step minimal --offline
+uv run python examples/15_evals.py --step enhanced --offline
+uv run python -m pytest tests/test_lesson15.py tests/test_budget.py tests/test_evals.py -q
 uv run python -m minicode.evals
 ```
 
-- 把 Edit 的旧字符串改错，确认任务验收失败，而不是被最后一句“完成”骗过。
-- 添加一个模型连续调用不存在工具直到轮数耗尽的任务。
-- 把 token 预算设得很小，确认下一次模型请求没有发送。
-- 用三组 HTTP fixture 运行同一任务，检查只有适配器编码不同。
-
-下一章把这些组件和检查打包成用户可以安装的 CLI。
+把离线剧本改成只回答“完成”，确认 `status=success` 但 `passed=false`。再让 Edit 的旧字符串不匹配，检查失败能否反映在最终文件验收里。最后添加一个真实任务，先写验收函数再运行模型。

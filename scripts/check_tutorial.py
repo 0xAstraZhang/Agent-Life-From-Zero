@@ -5,7 +5,7 @@ import re
 import sys
 import tempfile
 
-from stages import ROOT, export_stage, load_stages, verify_stage
+from stages import ROOT, checkpoints, export_stage, load_stages, verify_stage
 
 
 def check_links():
@@ -44,7 +44,7 @@ def main(argv=None):
                 stage = export_stage(chapter, Path(temporary))
                 outputs = verify_stage(chapter, stage)
                 summary = outputs[-1].splitlines()[-1]
-                print(f"PASS 第 {chapter:02} 章：独立示例 + 累积测试（{summary}）", flush=True)
+                print(f"PASS 第 {chapter:02} 章：{len(checkpoints(chapter))} 个教学检查点 + 累积测试（{summary}）", flush=True)
             except Exception as error:
                 errors.append(str(error))
     if errors:

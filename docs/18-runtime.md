@@ -1,156 +1,216 @@
-# 第 18 章：运行控制与可观测性
+# 第 18 章：一次只增加一种运行能力
 
-上一章：[沙箱](17-sandbox.md) · [目录](README.md)
+上一章：[沙箱](17-sandbox.md) · [目录](README.md) · [完整参数参考](18-runtime-reference.md)
 
-## 本章的完整累积目录
+Agent 已经能做任务。本章从最小的“记录一次请求用了多久”开始，再分别加入重试、任务期限、上下文压缩和进程日志。每个检查点独立运行，不需要一次读懂所有运行参数。
 
 ```bash
 uv run python scripts/check_tutorial.py --chapter 18 --export /tmp/minicode-ch18
 cd /tmp/minicode-ch18
 uv sync
-uv run python examples/18_runtime.py
-uv run python -m pytest tests -q
+uv run python examples/18_runtime.py --step minimal
 ```
 
-第 00–17 章继续使用对应阶段的快照。本章替换为最终实现，新增参数和事件不会提前出现在旧章节里。
+真实 API 配置沿用[第 00 章](00-setup.md)。完整练习文件是 [lessons/ch18.py](../lessons/ch18.py)。先逐项实现下面的变化，再与最终模块比较；模型参数、费用字段与平台限制保留在[参数参考](18-runtime-reference.md)。
 
-## 从“能运行”到“能解释一次运行”
+## 1. 最小检查点：只记录一次请求
 
-此前的 Agent 已经能调用工具、保存会话、限制累计 token 和运行 Linux 沙箱。要比较不同 Agent 的任务成功率，还需要知道：模型实际收到哪些控制参数，失败前是否重试，任务是否超时，长历史如何缩短，费用是怎样计算的。
+先给模型套一个小包装器。它不改变请求和回复，只在前后读取时钟：
 
-本章把这些控制分开：
+```python
+from dataclasses import asdict
+import time
 
-| 边界 | 负责什么 |
+
+class TimedModel:
+    def __init__(self, inner, record):
+        self.inner, self.record = inner, record
+        self.count = 0
+
+    def complete(self, messages, tools=()):
+        started = time.monotonic()
+        reply = self.inner.complete(messages, tools)
+        self.count += 1
+        self.record({"type": "request_end", "local_request_id": f"lesson-{self.count}",
+                     "seconds": time.monotonic() - started,
+                     "normalized_usage": asdict(reply.usage),
+                     "usage": getattr(reply, "usage_details", {})})
+        return reply
+```
+
+在完整练习文件中，`record` 先只是列表的 `append`：
+
+```python
+records = []
+reply = TimedModel(model, records.append).complete([Message.text("user", "你好，用一句话回复。")])
+print(message_text(reply.message))
+print(json.dumps(records, ensure_ascii=False))
+```
+
+运行后看两样东西：真实回复，以及包含 `seconds`、输入/输出 token 的记录。先确认原回复没有被包装器改变，再考虑失败请求怎样记录。
+
+## 2. 单独增加一次连接重试
+
+```bash
+uv run python examples/18_runtime.py --step retry
+```
+
+这个检查点只处理一种情况：连接尚未建立，等待一下，再尝试一次。它既不重试工具，也不处理流式输出：
+
+```python
+import httpx
+import time
+
+
+class RetryBeforeSend:
+    def __init__(self, inner, delay=0.1):
+        self.inner, self.delay, self.retries = inner, delay, 0
+
+    def complete(self, messages, tools=()):
+        try:
+            return self.inner.complete(messages, tools)
+        except httpx.ConnectError:
+            self.retries += 1
+            time.sleep(self.delay)
+            return self.inner.complete(messages, tools)
+```
+
+真实连接正常时，重试次数是 0。用显式离线注入观察失败路径：
+
+```bash
+uv run python examples/18_runtime.py --step retry --offline
+```
+
+这次第一次调用抛出连接错误，第二次返回回复，重试次数应为 1。实验关闭内层适配器的自动重试，避免两层重试混在一起。
+
+之后再读 [providers/base.py](../minicode/providers/base.py) 中的完整实现，依次增加可恢复状态码、指数退避、重试上限和日志。认证错误需要修改配置；读超时可能已经生成内容；已经输出的流不能直接从头重放。这些情况需要各自的测试。
+
+## 3. 给整个任务一个期限
+
+```bash
+uv run python examples/18_runtime.py --step deadline
+```
+
+这个检查点让模型调用固定的 Wait 工具（等待 0.05 秒），再回答完成。先只在原 Agent 创建处增加一个参数：
+
+```python
+agent = Agent(model, runner, max_turns=4, task_timeout=60)
+```
+
+真实 API 默认给任务 60 秒，正常完成应看到 `success`。然后用一个确定的离线实验观察期限真的生效：
+
+```bash
+uv run python examples/18_runtime.py --step deadline --offline
+```
+
+这里工具仍然真实等待 0.05 秒，期限缩短为 0.01 秒。预期终止状态是 `timeout`，检查点将这个预期结果记为通过；只回复“完成”或工具没有执行都不通过。通过 `--task-timeout` 可以调整期限；例如真实 API 下设置较短期限，观察请求阶段是否已经耗尽时间。
+
+实现时在任务开始计算 `deadline = time.monotonic() + seconds`，每次请求与工具执行都使用剩余时间；不能每进入一轮就重新获得 60 秒。
+
+最小的边界检查是：
+
+```python
+remaining = deadline - time.monotonic()
+if remaining <= 0:
+    raise TimeoutError("任务已达到时间上限")
+```
+
+完整实现还把剩余时间传给 HTTP 和进程工具。在支持 `setitimer` 的 POSIX 主线程中可以中断阻塞调用；其他运行环境依靠下层超时和工具配合。先理解“同一个绝对截止时间”，再读平台分支。
+
+## 4. 对长任务只压缩一次请求视图
+
+```bash
+uv run python examples/18_runtime.py --step context
+```
+
+实验只有一条用户目标“找出 answer 的值”，后面连续完成四次工具往返，不添加第二条用户输入。先摘要较早的工具往返，再带着原目标和近期结果继续请求。历史数据是练习输入；摘要和最终回复默认都由真实 API 生成。
+
+```python
+wrapped = CompactingModel(model, threshold_chars=300, keep_turns=1)
+reply = wrapped.complete(history)
+print("压缩次数：", wrapped.compactions)
+print("完整历史条数：", len(history))
+```
+
+预期压缩一次，原历史条数不变。第 10 章在新的用户轮开始时摘要，本次则在同一个任务的工具往返之间切分。继续保留两份数据：完整历史保留事实，请求视图是本次发给模型的材料。
+
+随后再扩展[compact.py](../minicode/compact.py)：只在完整工具往返之后切分；视图再次超限时，用旧摘要和新移出的内容继续摘要；视图未超限时复用已有摘要。最后才加入 token 估算与输出空间预留。不要每轮都重新摘要整段历史。
+
+## 5. 单独观察进程和日志分页
+
+```bash
+uv run python examples/18_runtime.py --step processes
+```
+
+这个检查点不请求模型。它只启动仓库内写明的 Python 命令，输出两行，然后分别读取第一页与第二页：
+
+```python
+import shlex
+import sys
+
+from minicode.processes import ProcessManager
+
+command = shlex.join([sys.executable, "-c", "print('first'); print('second')"])
+with ProcessManager() as manager:
+    session = manager.start(command, context, timeout=5, interactive=False)
+    first = manager.poll(session.id, context, wait=5, limit=6)
+    second = manager.read_log(session.id, context, offset=6, limit=20)
+    print(first.content)
+    print(second.content)
+```
+
+这段代码放在已有 `ToolContext` 的任务中，完整练习会创建临时工作目录。第一页是 `first`，第二页是 `second`；验收同时检查两页均读取成功。日志里的 `next_offset` 说明下一页从哪里继续；退出 `with` 时回收进程和临时日志。
+
+理解这个最小生命周期后，再接入 BashStart、BashPoll、BashLog，然后增加输入与停止操作。日志分页按字节计算；Read 的 `offset` 则按行计算。后台会话使用管道，不是 PTY；恢复对话也不会恢复已退出的进程。
+
+## 6. 增强检查点：把一次任务记录为 JSONL
+
+```bash
+uv run python examples/18_runtime.py --step enhanced
+```
+
+现在把最开始的列表换成 [RunRecorder](../minicode/observability.py)。它接收模型和 Agent 的事件，写入同一条时间线：
+
+```python
+recorder = RunRecorder(root / "run.jsonl")
+try:
+    model.observer = recorder.record
+    agent = Agent(model, runner, observer=recorder.record)
+    for event in agent.run("读取 answer.py 的第二行，再回答 answer 的值"):
+        print_event(event)
+    print(recorder.summary())
+finally:
+    recorder.close()
+```
+
+完整练习在临时目录运行，显示工具结果、最终回答、记录摘要和记录条数；退出后清理临时目录。离线模型没有请求观察器，因此离线检查点使用第一步的 `TimedModel` 写入确定记录。
+
+需要保存真实任务的记录时，用最终 CLI 的 `--event-log PATH`，选择一个新文件。运行记录保存计量元数据；`--session` 另存对话历史。
+
+## 7. 需要时再打开参数参考
+
+前面的检查点各自只增加一种机制。以下内容按实际需要查询，不作为这些实验的前置步骤：
+
+| 需要解决的问题 | 参考内容 |
 | --- | --- |
-| 模型配置和协议适配器 | 参数验证、协议字段、HTTP 请求、重试、原始 usage |
-| Agent 和压缩包装器 | 整任务期限、工具调度、历史压缩、完整工具往返 |
-| 文件和进程工具 | 分段读取、日志续读、后台进程与清理 |
-| CLI 和运行记录 | 明确配置来源、收集事件、按指定价格换算费用 |
+| 固定模型的思考与输出行为 | thinking、reasoning effort、tool choice、输出格式与协议兼容性 |
+| 为任务定上限 | 请求超时、任务期限、轮数、token 预算 |
+| 同时执行独立读取 | parallel_tools 与稳定的结果顺序 |
+| 计算费用 | 显式价表、缓存分项、未知 usage 的处理 |
+| 长期使用后台服务 | BashStart/Poll/Send/Stop/Log 的生命周期与权限 |
 
-## 显式控制模型
-
-`thinking` 表示是否开启思考，`reasoning_effort` 表示服务商支持的推理强度，`max_tokens` 表示单次输出上限。三个参数分别配置。保留上轮推理块是协议续轮所需的数据处理，也独立于思考开关。
-
-```bash
-uv run minicode --api anthropic-messages --provider deepseek \
-  --model deepseek-flash --base-url https://api.deepseek.com/anthropic/v1 \
-  --thinking enabled --reasoning-effort high \
-  --max-output-tokens 8192 --read-only \
-  -p "阅读 README，说明项目结构"
-```
-
-最终 URL 是 `/anthropic/v1/messages`，内部使用的 base URL 包含 `/v1`。CLI 会把已知 DeepSeek 官方地址规范化到所选协议的路径；上例显式写出完整地址，其他自定义服务仍需按其文档提供地址。密钥单独放在 `MINICODE_API_KEY` 中。
-
-后续 CLI 示例复用同一服务配置，可以先设置这些非秘密环境变量：
-
-```bash
-export MINICODE_API=anthropic-messages
-export MINICODE_PROVIDER=deepseek
-export MINICODE_MODEL=deepseek-flash
-export MINICODE_BASE_URL=https://api.deepseek.com/anthropic/v1
-export MINICODE_THINKING=enabled
-export MINICODE_REASONING_EFFORT=high
-```
-
-可选控制项包括采样参数 `--temperature`、`--top-p`，工具策略 `--tool-choice`、`--strict-tools`，以及最终回复的 `--response-format`、`--response-schema`。这些参数经过服务商和协议兼容检查；支持范围以代码中的校验和所选模型为准。工具执行许可仍由 `--allow-tool` 控制，改变模型的工具选择策略不会自动授予权限。
-
-| 参数 | 本章使用方式 |
-| --- | --- |
-| `--thinking` | `enabled` 或 `disabled`；也可通过 `MINICODE_THINKING` 设置 |
-| `--reasoning-effort` | DeepSeek 显式使用 `low/high/max`；环境变量是 `MINICODE_REASONING_EFFORT` |
-| `--thinking-budget-tokens` | 仅用于原生 Anthropic 显式思考预算，不能当作 DeepSeek 的 effort |
-| `--tool-choice` | `auto`、`none`、`required` 或 `tool:工具名`，具体支持范围按服务商检查；强制选择只作用到本次用户输入后的第一次工具调用 |
-| `--response-format json_object` | 请求 JSON 对象；DeepSeek 当前只开放已确认的 Chat 协议组合 |
-| `--response-format json_schema --response-schema FILE` | 加载 JSON Schema，只有支持该格式的服务商和协议才接受 |
-
-最终结构化回复还会在本地解析或验证 schema，格式错误不会被当作成功。工具调用中间轮次仍按工具协议处理。
-
-`required` 和 `tool:工具名` 若在每一轮都生效，模型永远无法给出最终回答，任务只能耗尽轮数。因此强制选择只用于本次用户输入后、第一次工具调用之前的请求；工具结果返回后不再发送 `tool_choice`，交回服务商默认。`auto` 和 `none` 每轮都发送。子 Agent 沿用路由、思考和采样设置，但不继承父任务的工具选择和最终输出格式：它的工具集合不同，返回的是散文摘要。
-
-DeepSeek 的思考模式默认值、effort 档位和采样参数效果由服务端决定。做评测时显式填写需要固定的参数，保存本次有效配置；不要把服务端忽略的参数当作已经控制的变量。参考 [Thinking Mode](https://api-docs.deepseek.com/guides/thinking_mode/) 和 [Anthropic API 兼容说明](https://api-docs.deepseek.com/guides/anthropic_api/)。
-
-## 请求重试与任务期限
-
-`--request-timeout` 控制 HTTP 超时，`--max-retries` 控制可恢复请求错误的重试次数，`--retry-base-delay` 和 `--retry-max-delay` 控制退避等待。认证、参数和协议错误需要修正原因；已向上层输出的流也不能直接从头重放。
-
-`--task-timeout` 限制整个用户任务的时间，覆盖请求、退避和工具执行。它与 `--max-turns`、`--token-budget` 共同限制任务：
-
-```bash
-uv run minicode --request-timeout 120 --max-retries 2 \
-  --task-timeout 900 --max-turns 40 --token-budget 200000 \
-  --allow-tool Read --allow-tool Edit --allow-tool Bash \
-  -p "修复失败的测试，并重新运行相关测试"
-```
-
-token 预算仍是在下一次请求之前检查的软上限，当前请求可能超额；服务端缺少 usage 时，无法凭本地数据恢复完整账单。任务超时和取消后应查看终止记录与文件状态，再决定如何继续。
-
-在支持 `setitimer` 的 POSIX 主线程中，任务期限能中断阻塞调用。其他平台或工作线程依赖 HTTP、进程工具的下层超时和执行边界检查；自定义工具也必须配合 deadline，不能据此宣称任意第三方工具都能被立即中断。
-
-## 单个长任务的上下文
-
-长任务中只有一次用户输入，也可能产生许多轮模型和工具消息。本章按完整工具往返寻找可压缩边界，保留用户目标、system 消息和最近的上下文，不拆开工具调用与对应结果。
-
-完整历史一旦超过阈值就会一直超过，所以不能每轮都按完整历史重新摘要。压缩后的请求视图仍低于阈值时，沿用上次的切分点和摘要；视图再次超限才移动切分点，并且只把新移出视图的记录与旧摘要一起交给模型续写。历史被修改、前缀对不上时才从头摘要。
-
-`--compact-chars` 保留旧的字符阈值入口；`--context-window` 指定模型上下文窗口，压缩时给 `--max-output-tokens` 预留空间。本地 token 数是估算值，用于提前收缩请求，不能替代服务商返回的实际 usage。
-
-`--parallel-tools N` 只并行执行声明为只读且 `parallel_safe` 的工具，写操作保持串行。所有调用继续经过同一权限和执行包装器，返回历史保持稳定顺序。
-
-## 分段读取和进程会话
-
-Read 可以只读取需要的行范围，避免长文件中间内容被截断后无法继续定位。`offset` 从第 1 行开始，`limit` 默认 200 行；超长单行可按返回提示设置从 0 开始的 `column`。例如模型可以调用：
-
-```json
-{"path": "src/server.py", "offset": 120, "limit": 80}
-```
-
-命令的大输出保存在进程管理器的私有临时日志中，以日志 ID 引用；日志工具可以分段读取完整内容。日志分页的 `offset` 和 `limit` 单位是字节，返回的 `next_offset` 用于下一次读取。
-
-后台命令通过 BashStart 启动，用 BashPoll 检查状态，BashSend 发送标准输入，BashStop 停止，BashLog 读取日志。它们与同步 Bash 一样需要明确授权。例如：
-
-```bash
-uv run minicode --allow-tool Bash --allow-tool BashStart \
-  --allow-tool BashPoll --allow-tool BashSend --allow-tool BashStop \
-  --allow-tool BashLog --task-timeout 600 \
-  -p "启动本地开发服务，检查健康接口，然后停止服务"
-```
-
-这些会话使用管道而非 PTY。BashSend 的 `text` 不自动追加换行，`eof=true` 关闭输入；非阻塞 stdin 写入目前只支持 POSIX。CLI 退出时清理所管理的进程；在 Linux 沙箱模式下，新启动的命令仍通过同一 bubblewrap 配置执行。
-
-进程日志只属于当前运行，不是会话恢复文件。恢复对话不会重新连接已经退出的进程。
-
-## 记录用量和费用
-
-`--event-log PATH` 将运行记录写成 JSONL，与 `--session` 保存的对话历史分开。请求记录保留原始 usage 和归一化总数，包含重试、耗时、请求 ID 以及非秘密配置；工具、压缩和任务终止事件也写入同一条运行轨迹。
-
-`--prices PATH` 显式加载价格文件，按输入、输出和缓存分项计算费用。项目不内置默认价格。价表 JSON 必须有以下字段：
-
-| 字段 | 内容 |
-| --- | --- |
-| `model` | 与本次配置完全一致的模型 ID |
-| `currency` | 费用币种 |
-| `as_of` | 核对价格的日期，格式为 `YYYY-MM-DD` |
-| `input_per_million` | 普通输入每百万 token 的价格 |
-| `output_per_million` | 输出每百万 token 的价格 |
-| `cache_read_per_million` | 缓存命中每百万 token 的价格 |
-| `cache_write_per_million` | 创建缓存每百万 token 的价格 |
-
-缓存分项与普通输入互斥，推理 token 已包含在输出中时不会再次收费。服务商缺少用量时，`estimated_cost` 为 `null`，另保留已知费用小计和未知用量的请求数。价格有时段差异时应按对应时段分别运行或复算。
-
-可以确定没有生成的失败请求按零用量计入，并在请求记录中标记 `unbilled: true`：连接未建立，或服务商以 4xx（包括 429）拒绝。读超时、5xx 和中途断开的流可能已经计费，仍记为未知。
-
-事件日志必须使用新文件路径，避免覆盖上一次结果。它记录控制和计量元数据，不包含提示词、工具参数和工具输出；`--session` 和 `--json` 中的对话内容另按实际需求保存。
-
-线上评测需要保存模型和 Agent 版本、任务版本、配置、日志、最终补丁和独立验收结果。本章新增的离线实验只验证控制和计量链路，任务成功率仍须用真实任务与外部验收获得。
+这些说明完整保存在[运行控制与记录参考](18-runtime-reference.md)。默认参数值、支持范围和价格都应以选定服务为准。完成一次真实任务并保存验收结果后，再比较参数变化是否改善任务效果。
 
 ## 验收
 
 ```bash
-uv run python examples/18_runtime.py
-uv run python -m pytest tests -q
-uv run python scripts/check_tutorial.py
-uv run python -m minicode.evals
-uv build
+uv run python examples/18_runtime.py --step minimal --offline
+uv run python examples/18_runtime.py --step retry --offline
+uv run python examples/18_runtime.py --step deadline --offline
+uv run python examples/18_runtime.py --step context --offline
+uv run python examples/18_runtime.py --step processes
+uv run python examples/18_runtime.py --step enhanced --offline
+uv run python -m pytest tests/test_lesson18.py -q
 ```
 
-真实 DeepSeek 请求需要密钥并产生服务商费用。默认章节实验和自动测试使用假模型、假 HTTP 响应或本地子进程，不调用收费模型。
+然后运行本阶段累计测试。原教程仓库还运行 `scripts/check_tutorial.py`、`python -m minicode.evals` 与 `uv build`，确认阶段导出、任务验收和安装包仍可使用。

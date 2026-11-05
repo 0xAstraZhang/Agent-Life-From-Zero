@@ -3,7 +3,24 @@ import json
 
 import pytest
 
-from scripts.stages import export_stage, run_isolated, stage_files
+from scripts.stages import checkpoints, export_stage, load_stages, run_isolated, stage_files
+
+
+def test_every_chapter_exports_all_teaching_checkpoints():
+    for stage in load_stages():
+        points = checkpoints(stage["chapter"])
+        assert len(points) >= 2, stage["chapter"]
+        assert all("--offline" in point["args"] for point in points if stage["chapter"] != 17)
+
+
+def test_first_stage_can_call_a_real_api_without_future_modules(tmp_path):
+    stage = export_stage(0, tmp_path / "ch00")
+    assert (stage / "lessons/ch00.py").exists()
+    assert not (stage / "minicode").exists()
+    readme = (stage / "README.md").read_text()
+    assert "MINICODE_API_KEY" in readme
+    assert "--step minimal" in readme and "--step enhanced" in readme
+    assert "可选的真实接口" not in readme
 
 
 def test_export_rejects_nonempty_directory_without_modifying_it(tmp_path):

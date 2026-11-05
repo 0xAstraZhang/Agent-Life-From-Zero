@@ -1,233 +1,147 @@
-# 第 11 章：Hooks 与规划，让执行过程可观察、可约束
+# 第 11 章：先记录工具执行，再让模型维护计划
 
-上一章：[会话与压缩](10-sessions-compaction.md) · 下一章：[子 Agent](12-subagents.md)
+[上一章：会话与压缩](10-sessions-compaction.md) · [目录](README.md) · [下一章：子 Agent](12-subagents.md)
 
-Agent 已经能执行工具、保存历史和压缩请求。
-现在需要在执行前检查调用，在执行后记录结果，并把长任务的计划变成可检查的状态。
+本章有两个小实验：在工具执行后记一条日志；把待办列表交给模型通过工具更新。两者都复用已有循环，分别跑通即可。
 
-本章新增 [hooks.py](../minicode/hooks.py) 和 [planning.py](../minicode/planning.py)。
-Hook 包装工具执行层，计划通过普通工具更新。
-它们都不读取 Chat Completions、Responses 或 Anthropic 的原始字段。
+## 1. 最小 hook：在执行之后调用一个函数
 
-这两个链接是本章首次引入的完整文件。下面的回调片段解释接口；“组合现有执行层”给出需要替换的完整组装段。
-本章示例只用一个待办工具展示行为；累积到自己的 Agent 时，保留原有工具列表和权限配置。
-
-## 本章的完整累积目录
-
-导出只包含第 00–11 章文件的工作目录，再在里面运行示例和本章测试：
-
-```bash
-uv run python scripts/check_tutorial.py --chapter 11 --export /tmp/minicode-ch11
-cd /tmp/minicode-ch11
-uv sync
-uv run python -m pytest tests -q
-```
-
-目标必须是新目录或空目录。导出目录的 README 列出本章新增、替换的完整文件和实验命令。这些文件可直接编辑；隔离验收会阻止它从原仓库加载尚未学习的模块。
-
-## 先观察完成后的效果
-
-```bash
-uv run python examples/11_hooks_planning.py
-```
-
-输出：
-
-```text
-计划已记录。
-[{'task': '定位问题', 'status': 'in_progress'}]
-[('TodoWrite', False)]
-```
-
-最后一行来自执行后 hook，记录工具名称和是否出错。
-它不是模型生成的内容。
-
-## 第一步：确定 hook 的位置
-
-工具执行已经被封装成 `runner.run(ToolCall) -> ToolResult`。
-现在在外面再包一层：
-
-```text
-Agent
-  → before hook
-  → PermissionRunner
-  → ToolRunner：参数校验、执行
-  → after hook
-  → ToolResult
-```
-
-`HookRunner` 仍然提供 `specs()` 和 `run()`，因此 Agent 无需增加新的参数。
-模型看到的工具声明也不会因为存在 hook 而改变。
-
-关键是顺序：执行前 hook 改写后的调用，必须重新经过权限和参数校验。
-如果把 hook 放在权限检查后面，它可能把允许的 Read 改成未经允许的 Write。
-
-## 第二步：实现执行前回调
-
-`before` 接收 `ToolCall` 的副本，有三种返回方式：
-
-| 返回值 | 行为 |
-| --- | --- |
-| `None` | 按原调用继续 |
-| `ToolCall` | 使用新调用，再经过权限与校验 |
-| `ToolResult` | 直接返回结果，不执行工具 |
-
-改写时必须保留调用 ID。
-否则模型发起的调用和应用返回的结果就失去对应关系。
-
-例如，阻止写入某个教学用文件：
+已有执行器提供 `run(call) → result`。在它外面包一层，拿到结果后调用 `after`，再把同一个结果返回 Agent：
 
 ```python
-from minicode.types import ToolResult
+class LoggingRunner:
+    def __init__(self, inner, after):
+        self.inner, self.after = inner, after
+        self.tools, self.context = inner.tools, inner.context
 
-def before(call):
-    if call.name == "Write" and call.arguments.get("path") == "protected.txt":
-        return ToolResult(call.id, "这个文件由练习规则保护。", True)
-    return None
+    def specs(self):
+        return self.inner.specs()
+
+    def run(self, call):
+        result = self.inner.run(call)
+        self.after(call, result)
+        return result
 ```
 
-上面只是 hook 形状示例；具体参数名以工具的 `ToolSpec` 为准。
-真正的路径边界仍应由权限层和文件工具检查，不能只靠字符串匹配。
-
-## 第三步：执行后只观察结果
-
-`after` 收到调用和结果的副本，可以记录日志、统计耗时或收集评测数据。
-这个版本不允许它把失败结果改成成功。
+这就是 hook 的骨架。`specs()` 保持原来的工具声明，`run()` 增加一次观察。下面给它传一个记录函数：
 
 ```python
 records = []
 
 def after(call, result):
-    records.append({
-        "tool": call.name,
-        "call_id": call.id,
-        "is_error": result.is_error,
+    records.append((call.name, result.is_error))
+
+runner = LoggingRunner(permission_runner, after)
+```
+
+`minimal` 检查点让真实模型调用 `ReadNote` 读取临时项目记录。回答后打印 `records`，可以看到日志是 Python 在执行工具之后写的。
+
+## 运行本章检查点
+
+沿用第 00 章配置的 `MINICODE_MODEL`、`MINICODE_BASE_URL`、`MINICODE_API_KEY`。默认使用真实 API；回答措辞不固定，观察消息与工具的实际变化。需要独立工作目录时，在教程仓库根目录导出：
+
+```bash
+uv run python scripts/check_tutorial.py --chapter 11 --export /tmp/minicode-ch11
+cd /tmp/minicode-ch11
+uv sync
+```
+
+在仓库根目录或导出目录运行：
+
+```bash
+uv run python examples/11_hooks_planning.py --step minimal
+uv run python examples/11_hooks_planning.py --step enhanced
+uv run python examples/11_hooks_planning.py --step todo
+uv run python examples/11_hooks_planning.py --step todo-enhanced
+```
+
+给同一命令加 `--offline` 可运行固定回复的回归检查。它用来验证程序控制流；学习时先观察真实请求。协议可用 `--api` 选择。
+
+
+## 2. hook 增强：再增加改写、拦截和失败处理
+
+把原型换成 [HookRunner](../minicode/hooks.py)，`enhanced` 先复现相同的日志行为。然后可以给它传 `before`：
+
+```python
+def before(call):
+    if call.name == "Write" and call.arguments.get("path") == "protected.txt":
+        return ToolResult(call.id, "练习规则不允许写这个文件。", True)
+    return None
+
+runner = HookRunner(permission_runner, before=before, after=after)
+```
+
+`before` 返回 `None` 就继续；返回 `ToolResult` 就结束这次调用；返回 `ToolCall` 就改用新调用。引入改写时，要同步保留调用 ID，并让改写后的调用重新经过权限与参数校验：
+
+```text
+Agent → before → PermissionRunner → ToolRunner → after → Agent
+```
+
+增强实现给回调传副本，捕获回调异常；执行后回调不能改写已经发生的结果。工具已执行时，日志回调出错不能成为自动重做写操作的理由。
+
+## 3. 最小计划：一个列表和一个更新工具
+
+先创建 `items = []`。模型调用 `TodoWrite` 时，用传入的清单替换列表，再把新清单作为工具结果返回。
+
+```python
+def todo_tool(items):
+    def execute(args, context):
+        items[:] = args["items"]
+        return json.dumps(items, ensure_ascii=False)
+
+    spec = ToolSpec("TodoWrite", "用完整任务清单更新计划。", {
+        "type": "object", "properties": {"items": {"type": "array", "items": {
+            "type": "object", "properties": {
+                "task": {"type": "string"},
+                "status": {"type": "string", "enum": ["pending", "in_progress", "done"]}},
+            "required": ["task", "status"], "additionalProperties": False}}},
+        "required": ["items"], "additionalProperties": False,
     })
+    return Tool(spec, execute)
 ```
 
-执行后的回调抛出异常时，返回内容会注明 hook 失败。
-工具本身已经执行过，不能因此自动重试原来的写操作。
+完整导入见 [lessons/ch11.py](../lessons/ch11.py)。核心是 `items[:] = args["items"]`：保留同一个列表对象，更新它的内容。声明告诉模型每一项需要任务文字和状态。
 
-本章只运行由应用代码显式传入的 Python 回调。
-不会扫描项目目录并执行其中的 shell 脚本。
-将来支持配置化 hook 时，需要另外设计目录信任和授权流程。
+`todo` 检查点独立运行这条路径。它让模型先写入两步计划，再打印实际保存的列表。没有 hook 也能运行，因为计划本身就是普通工具。
 
-## 第四步：组合现有执行层
+## 4. 计划增强：从状态更新到明确约束
 
-以下代码替换应用的组装段，在创建 Agent 前运行。
-此时 `runner` 是第 7 章留下的 `PermissionRunner`；第 9、10 章只改变模型上下文和会话，不替换它。
-先保存它的工具对象、上下文和权限设置，然后定义一个可复用的组装函数：
+换用 [TodoList](../minicode/planning.py)，再加入“最多一项进行中”的跨条目检查。`todo-enhanced` 使用这个版本。
 
 ```python
-from minicode.hooks import HookRunner
-from minicode.permissions import PermissionRunner
-from minicode.tool import ToolRunner
-
-tools = list(runner.tools.values())
-context = runner.context
-permission_options = {
-    "approval": runner.approval,
-    "read_only": runner.read_only,
-    "allowed": tuple(runner.allowed),
-}
-hook_options = {"before": before, "after": after}
-
-
-def assemble(current_tools):
-    inner = ToolRunner(current_tools, context)
-    permissions = PermissionRunner(inner, **permission_options)
-    return HookRunner(permissions, **hook_options)
-
-
-runner = assemble(tools)
-agent = Agent(model, runner)
-```
-
-每一层只有一个职责。
-HookRunner 调用内层 runner，不直接调用 `tool.execute()`，所以无法意外跳过内层规则。
-`permission_options` 保留同一个审批对象、只读模式和显式授权；`hook_options` 保留本章的回调。
-后面增加工具时复用 `assemble()`，不要把最外层 runner 替换成裸 `ToolRunner`。
-这里是启动前的装配，不是在运行中的任务里新建 Agent；已经有对话历史时继续沿用原来的 Agent 和会话。
-
-## 第五步：把计划做成一个工具
-
-计划由 `TodoList` 保存，模型通过 `TodoWrite` 更新。
-每项有任务描述和三种状态：`pending`、`in_progress`、`done`。
-
-```python
-from minicode.planning import TodoList
-
 todo = TodoList()
 tools.append(todo.tool())
 permission_options["allowed"] = (*permission_options["allowed"], "TodoWrite")
 runner = assemble(tools)
-agent = Agent(model, runner)
 ```
 
-这是本章明确允许更新待办的配置，不是模型自己添加权限。
-`ToolRunner` 在构造时建立注册表，所以只向 `tools` 列表追加对象还不够，必须在创建 Agent 前重新组装。
-如果前面开启了只读模式，`read_only=True` 仍然优先，TodoWrite 继续被拒绝。
+`TodoWrite` 会修改内存状态，应用显式授权它。计划中的 `done` 只是模型更新的状态，实际完成仍要看文件和测试结果。
 
-工具参数本身用 JSON Schema 校验；跨条目的约束在执行函数中检查：
+若要增加只调查、不修改文件的计划模式，再用 `readonly_runner()` 过滤并拒绝写工具。它不包含修改待办状态的 `TodoWrite`；这与“维护计划列表”是两个不同功能。
+
+## 5. 接回已有应用
+
+保留之前的工具对象、上下文、审批配置和回调。在启动下一次任务前重建外层包装：
 
 ```python
-if sum(item["status"] == "in_progress" for item in args["items"]) > 1:
-    return ToolResult("", "同一时间只能有一项 in_progress", True)
+def assemble(current_tools):
+    inner = ToolRunner(current_tools, context)
+    permissions = PermissionRunner(inner, **permission_options)
+    return HookRunner(permissions, **hook_options)
 ```
 
-`ToolRunner` 会把这里暂时为空的 `call_id` 换成实际调用 ID。
-工具实现不需要自己猜测当前调用来自哪一轮。
+其中 `permission_options` 保存原来的 `approval`、`allowed`、`read_only`；`hook_options` 保存本章的 `before`、`after`。新增工具时扩充内层列表，已有会话沿用原来的 Agent 和历史。
 
-`TodoWrite` 修改内存状态，因此没有标为只读。
-是否允许模型更新待办，由应用的权限配置决定。
-示例使用 PermissionRunner 显式允许 TodoWrite；其余操作仍按已有权限配置处理。
-
-## 第六步：计划模式必须落实到工具层
-
-只在提示词里写“现在不要修改文件”不够。
-`readonly_runner()` 提供一个只读视图：工具声明里只保留 `read_only=True` 的工具，
-执行时再次拒绝不在这个集合中的调用。
-
-```python
-from minicode.planning import readonly_runner
-
-plan_runner = readonly_runner(PermissionRunner(ToolRunner(tools, context), **permission_options))
-planner = Agent(model, plan_runner, "只调查现状并提出计划。")
-```
-
-即使模型凭记忆调用 Write，运行时也不会执行它。
-这个视图可以包住已有 PermissionRunner，继续使用同一套路径检查与审批对象。
-
-当前计划模式只调查并输出计划，不包含 TodoWrite，因为更新待办也会修改状态。
-需要让计划模式更新待办时，可以显式设计例外；不要把 TodoWrite 伪装成只读工具。
-
-## 计划不是完成证据
-
-模型把某项改成 `done`，只表示它声称完成了。
-是否真正完成，要看工具结果和第 15 章的验收检查。
-一个合理的计划可以帮助模型记住步骤，但不能替代测试、文件检查或用户要求。
-
-## 离线检查
+## 检查与练习
 
 ```bash
-uv run pytest tests/test_hooks.py tests/test_planning.py -q
+uv run python examples/11_hooks_planning.py --step minimal --offline
+uv run python examples/11_hooks_planning.py --step enhanced --offline
+uv run python examples/11_hooks_planning.py --step todo --offline
+uv run python examples/11_hooks_planning.py --step todo-enhanced --offline
+uv run python -m pytest tests/test_lesson_11.py tests/test_hooks.py tests/test_planning.py -q
 ```
 
-测试会把 Read 改写成 Write，确认仍然被权限层拦截；
-还会检查 ID 不可改写、after 不能掩盖失败、多个进行中任务被拒绝，以及计划模式不能写文件。
-这些测试不导入子 Agent 或 Skills，完成第 11 章即可独立收集并运行。
+先确认日志发生在执行之后、计划更新能进入下一轮请求，再检查改写后的权限、ID 保持、回调异常和计划状态约束。
 
-完整示例见 [11_hooks_planning.py](../examples/11_hooks_planning.py)。
-
-## 开源实现中的对应边界
-
-[pi 的 Agent 循环](https://github.com/earendil-works/pi/blob/676af1d777ef6f04b6bc8daf4cf3b9b1799cff4d/packages/agent/src/agent-loop.ts)
-把工具参数验证、执行过程和结果消息组织放在 Agent 层。
-minicode 把这些步骤拆成小的 runner，便于逐章看清新增行为。
-协议适配器始终不负责执行 hook 或决定权限。
-
-## 自检与练习
-
-1. 写一个 after hook，记录每个工具的成功和失败次数。
-2. 写一个 before hook，改写合法参数，再证明改写后仍会执行参数校验。
-3. 给计划增加“完成依据”字段，但不要让这个字段本身成为任务完成的判定标准。
+练习：让模型更新计划中的第二项，观察列表变化；再给 after 加入耗时记录。运行入口见 [11_hooks_planning.py](../examples/11_hooks_planning.py)。

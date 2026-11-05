@@ -1,6 +1,10 @@
-# 第 5 章：接入 Anthropic Messages
+# 第 5 章（选修）：把同一个工具接到 Anthropic Messages
 
-先回到教程仓库根目录，执行下面的导出命令；随后进入独立的本章目录。手写时保留自己的练习目录，用导出版本核对文件清单和差异：
+[Chat Completions](03-chat-completions.md) · [Responses 选修](04-responses.md) · [目录](README.md) · [继续主线：编码工具](06-coding-tools.md)
+
+本章把已经跑通的工具闭环换成 Messages 格式。它不依赖你理解 Responses 的细节；也不是进入编码工具章节的前提。
+
+先在教程仓库根目录导出本章，再进入练习目录：
 
 ```bash
 uv run python scripts/check_tutorial.py --chapter 05 --export /tmp/minicode-ch05
@@ -8,174 +12,118 @@ cd /tmp/minicode-ch05
 uv sync
 ```
 
-以下运行和测试命令在本章练习目录中执行。目录只含第 00–05 章的代码与测试；文件增量由[阶段清单](../lessons/stages.json)记录。导出目标必须为空，不会覆盖已有练习。
+导出目标须为空或尚不存在。以下命令在练习目录执行；真实调用沿用第 00 章的环境变量配置。
 
-[上一章：Responses](04-responses.md) · [目录](README.md) · [下一章：编码工具](06-coding-tools.md)
-
-这一章接上第三种协议。它的工具调用是 assistant 消息中的 `tool_use` 块，工具结果则放进 user 消息的 `tool_result` 块。
-
-如果此时需要复制 Agent 循环，说明前面的边界还没建立好。本章只新增协议适配和契约测试，让前两章建立的内部结构继续工作。
-
-## 本章新增什么
-
-实现：[providers/anthropic.py](../lessons/stages/05/minicode/providers/anthropic.py)。
-
-运行：[05_anthropic.py](../examples/05_anthropic.py)。
-
-检查：[test_ch05.py](../tests/test_ch05.py) 中的 Messages 工具往返测试。
-
-按下面顺序阅读：认证请求头 → system 提取 → 内容块转换 → 结果合并 → 回复解码。流式部分在第 8 章展开。
-
-本章只新增或替换以下完整文件，其他文件保留上一章版本：
-
-| 操作 | 文件 |
-| --- | --- |
-| 新增适配器 | [providers/anthropic.py](../lessons/stages/05/minicode/providers/anthropic.py) |
-| 扩展协议注册 | [providers/__init__.py](../lessons/stages/05/minicode/providers/__init__.py) |
-| 增加本协议假 HTTP 数据 | [providers/demo.py](../lessons/stages/05/minicode/providers/demo.py) |
-| 新增实验与测试 | [本章实验](../examples/05_anthropic.py)、[本章测试](../tests/test_ch05.py) |
-
-工厂只注册截至本章已经创建的协议，实验仍调用非流式 `Agent(model, runner)`。下文的短数据块用于解释转换；可运行的完整文件以上表为准。
-
-## 第一步：构造请求
-
-`base_url` 使用 `https://api.anthropic.com/v1`，适配器再添加 `/messages`。认证和版本由适配器提供：
-
-```python
-headers = {
-    "x-api-key": config.api_key,
-    "anthropic-version": "2023-06-01",
-}
-```
-
-与前两个协议不同，system 指令在顶层。`encode()` 收集内部 system 消息，合成请求的 `system` 字段；其余内容进入 `messages`。
-
-```python
-body = {
-    "model": config.model,
-    "max_tokens": config.max_tokens,
-    "system": "你是一个编程助手。",
-    "messages": [{"role": "user", "content": [
-        {"type": "text", "text": "2 加 3 等于多少？"}
-    ]}],
-}
-```
-
-这里仍然没有执行工具。适配器只描述当前对话。
-
-## 第二步：转换工具定义和调用
-
-工具 schema 放进 `input_schema`：
-
-```python
-wire_tool = {
-    "name": spec.name,
-    "description": spec.description,
-    "input_schema": spec.parameters,
-}
-```
-
-模型返回的工具块类似：
-
-```json
-{
-  "type": "tool_use",
-  "id": "call_1",
-  "name": "add",
-  "input": {"a": 2, "b": 3}
-}
-```
-
-`input` 已经是对象，不像前两种协议那样是 JSON 字符串。`decode()` 将它转换为同一个 `ToolCall("call_1", "add", {"a": 2, "b": 3})`。
-
-模型回复中可以同时有文本和工具块。按顺序遍历 `content`，保留各块的先后关系。不要只取第一个文本块，也不要假设每次只会调用一个工具。
-
-## 第三步：把一批结果合成 user 内容块
-
-内部仍然记录：
-
-```python
-Message("tool", [ToolResult("call_a", "5")])
-Message("tool", [ToolResult("call_b", "权限拒绝", is_error=True)])
-```
-
-适配器把连续的两条结果合并：
-
-```json
-{
-  "role": "user",
-  "content": [
-    {"type": "tool_result", "tool_use_id": "call_a", "content": "5", "is_error": false},
-    {"type": "tool_result", "tool_use_id": "call_b", "content": "权限拒绝", "is_error": true}
-  ]
-}
-```
-
-为什么要合并？这两个结果共同回答上一条 assistant 消息中的两个调用。它们应紧接那条消息，先交齐结果，再继续普通用户文本。
-
-`is_error` 在此协议中有原生字段。内部错误语义保持不变，具体如何在线路上表达，由适配器决定。
-
-内部的 `role="tool"` 并不要求外部协议也存在 tool 角色。内部类型表达的是业务语义，不是某个 API 的字段复刻。
-
-## 第四步：保留思考块和结束状态
-
-思考块和 redacted thinking 数据放进原始内容元数据，同一路由续轮时原样回放。签名不作为普通可见文本显示，也不由 Agent 修改。
-
-这条规则与上一章一致：只有来源相同、内部消息未编辑，才能回放原始数据。跨模型、跨协议时只重新编码公共内容；这不保证跨模型推理状态连续。
-
-| Messages 停止原因 | 内部状态 |
-| --- | --- |
-| end_turn、stop_sequence | `stop` |
-| tool_use | `tool_calls` |
-| max_tokens | `length` |
-| refusal | `refusal` |
-| 其他未支持状态 | `error` |
-
-`pause_turn` 等服务端工具流程不在这个教学客户端的范围内，不能把它们当成最终回答。
-
-输入 token 统计还会计入返回的 cache read 和 cache creation 数量。我们先统一总量；需要精确费用时，再分别记录缓存类别和对应价格，不能把这三个数量套进同一价格后声称得到准确账单。
-
-## 第五步：运行相同的工具闭环
+## 1. 先看到一次真实工具往返
 
 ```bash
 uv run python examples/05_anthropic.py
 ```
 
-预期输出：
+接口地址需支持 Anthropic Messages。沿用已配置的模型、地址和密钥；如果使用不同服务，先修改这组配置。程序应先打印 `本地 add → 5`，再打印模型根据工具结果给出的回答。
+
+打开 [anthropic_prototype.py 中的 anthropic_roundtrip](../lessons/anthropic_prototype.py)。这一版直接发送两次 HTTP 请求：
 
 ```text
-anthropic-messages: 两次 HTTP 请求，一次本地工具调用
-结果是 5。
+user: 请计算
+assistant: tool_use
+Python: 执行 add
+user: tool_result
+assistant: 回答
 ```
 
+工具仍是普通 Python 函数，变化只有请求和结果的外部表示。
+
+## 2. 写出请求、调用与结果
+
+先构造请求。Messages 的工具 schema 字段叫 `input_schema`：
+
+```python
+headers = {"x-api-key": config.api_key, "anthropic-version": "2023-06-01"}
+body = {
+    "model": config.model,
+    "max_tokens": config.max_tokens,
+    "messages": [{"role": "user", "content": "请调用 add 计算 2 加 3，再回答。"}],
+    "tools": [{"name": "add", "description": "两个整数相加", "input_schema": PARAMETERS}],
+}
+first = post(client, config, "/messages", headers, body)
+```
+
+第一次响应中的调用长这样：
+
+```json
+{"type": "tool_use", "id": "call_1", "name": "add", "input": {"a": 2, "b": 3}}
+```
+
+`input` 已经是对象，可以直接取参数，不需要 `json.loads()`。执行后，把原助手内容与工具结果放回历史：
+
+```python
+body["messages"].append({"role": "assistant", "content": first["content"]})
+results = []
+for block in first["content"]:
+    if block["type"] == "tool_use":
+        result = str(block["input"]["a"] + block["input"]["b"])
+        results.append({"type": "tool_result", "tool_use_id": block["id"], "content": result})
+body["messages"].append({"role": "user", "content": results})
+final = post(client, config, "/messages", headers, body)
+```
+
+这是正常路径的解释片段；完整函数会先确认 `stop_reason="tool_use"`。原型保留全部 assistant 内容，因此模型返回的其他必要块也能随历史继续传递。
+
+现在只需记住：`tool_use.id` 对应结果中的 `tool_use_id`，结果装在 **user 消息**中。它并不表示用户亲手输入了这段文字，而是此协议要求的结果位置。
+
+## 3. 从原型提取适配器
+
+把外部内容块转换成已有内部对象：
+
+| Messages 数据 | 内部对象 |
+| --- | --- |
+| text 块 | `Text` |
+| tool_use 块 | `ToolCall` |
+| user 中的 tool_result 块 | `ToolResult` |
+| end_turn / tool_use | `stop` / `tool_calls` |
+
+完整 [Anthropic 适配器](../lessons/stages/05/minicode/providers/anthropic.py)还把内部 system 消息提到请求顶层的 `system`，并在[工厂](../lessons/stages/05/minicode/providers/__init__.py)注册协议。
+
 ```bash
+uv run python examples/05_anthropic.py --step enhanced
+```
+
+这一检查点用完整适配器接回已有 Agent。Agent 依然只知道统一消息和工具；协议层负责 `user.tool_result` 的转换。
+
+## 4. 再从一次调用扩展到一批调用
+
+现在让模型一次发出两个 `tool_use`。程序逐个执行，再将两个结果放进同一条 user 消息：
+
+```json
+{"role": "user", "content": [
+  {"type": "tool_result", "tool_use_id": "call_a", "content": "5"},
+  {"type": "tool_result", "tool_use_id": "call_b", "content": "9"}
+]}
+```
+
+它们共同回答上一条 assistant 消息中的调用。完整适配器将内部连续的 tool 消息合并，调用与结果之间不插入普通对话。
+
+再令其中一个工具失败，给它的结果增加 `is_error: true`。另一项仍保留自己的结果与 ID。先跑通一条调用，才能看清批量只是把这一步重复多次。
+
+## 5. 补齐停止状态和原始内容
+
+- `max_tokens` 表示回复被截断，不能继续执行里面的工具；拒绝和未支持状态也需要作为非成功状态返回。
+- 思考块和签名随原始 assistant 内容保存；统一结构中放进 `provider_data`。同一路由未编辑消息可以回放，编辑或切换模型后再按第三章规则处理。
+- 输入用量可能包含不同缓存类别。先记录用量；精确费用留到第 15、18 章，不在第一次协议往返时加入计价逻辑。
+
+增强版完整支持上述规则。短原型用来观察正常闭环，只处理本地加法工具和两次请求。
+
+## 6. 验收
+
+```bash
+uv run python examples/05_anthropic.py --offline
+uv run python examples/05_anthropic.py --step enhanced --offline
 uv run python -m pytest tests/test_ch05.py -q
 ```
 
-本章测试检查完整 HTTP 往返、多个结果合并及原生 `is_error` 的保留。再阅读 `encode()` 中的顶层 system 和 `input_schema`，确认这些转换没有进入 Agent。截断回复不执行工具的内核约束继续由第三章测试保护。
+第一条使用固定 HTTP 响应检查最小原型，第二条检查完整适配器与 Agent。确认第二次请求中 `tool_use_id` 与原调用相同，再检查多个结果会一起回传。
 
-再一起跑三种协议：
+本章复用 [anthropic_prototype.py](../lessons/anthropic_prototype.py)和[加法工具](../lessons/protocol_roundtrip.py)，增加[实验入口](../examples/05_anthropic.py)及当前协议适配器；累计文件见[阶段清单](../lessons/stages.json)。
 
-```bash
-uv run python -m pytest tests/test_ch03.py tests/test_ch04.py tests/test_ch05.py -q
-```
-
-真实入口同样沿用第三章：
-
-```bash
-uv run python examples/live_model.py --env-prefix LLM --api anthropic-messages
-```
-
-DeepSeek 的 Messages 请求路径是 `/anthropic/v1/messages`；入口识别 DeepSeek 根地址时会选择 `https://api.deepseek.com/anthropic/v1` 作为此适配器的 base URL。连接其他服务时要显式配置其对应地址，不能把普通 OpenAI 根地址直接当成 Messages 地址。
-
-此时我们的第一项跨协议验收完成了：相同的 ToolRunner、Agent 和内部历史，通过三种编码方式完成同一种任务。
-
-## 对照开源实现
-
-[OpenCode 的 Anthropic 协议层](https://github.com/anomalyco/opencode/blob/59e95cc5394b7714451608099ef4db7bffc904b6/packages/ai/src/protocols/anthropic-messages.ts)把内部消息转换为 Messages 请求，并处理内容块和结果合并。
-
-[pi 的 Anthropic 适配器](https://github.com/earendil-works/pi/blob/676af1d777ef6f04b6bc8daf4cf3b9b1799cff4d/packages/ai/src/api/anthropic-messages.ts)可用于追踪工具结果、消息和工具声明的转换。阅读时只追这三条路径，不必一次理解全部模型能力。
-
-练习：让假服务一次请求两个加法调用，其中一个参数类型错误。确认程序执行合法调用，为另一个生成错误结果，并在下一次请求的同一个 user 内容数组里回传两者。
-
-协议资料：[Anthropic 工具调用与结果](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls)。当前实现不包含多模态输入、服务端工具和思考模式配置；它会保留已经收到的思考块，但不会替你开启对应模型能力。
+协议资料：[Anthropic 工具调用与结果](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls)。下一步回到[编码工具](06-coding-tools.md)，让 Agent 修改一个真实文件。
