@@ -12,7 +12,7 @@ cd /tmp/minicode-ch17
 uv sync
 ```
 
-导出目录包含第 00–17 章的全部文件。本章新增 [sandbox.py](../minicode/sandbox.py)、[实验入口](../examples/17_sandbox.py)和[本章测试](../tests/test_sandbox.py)，并替换 [cli.py](../minicode/cli.py)，增加三个参数。第 16 章的 CLI 保存在[阶段快照](../lessons/stages/16/minicode/cli.py)里。其他模块不变。
+导出目录包含第 00–17 章的全部文件。本章新增 [sandbox.py](../lessons/stages/17/minicode/sandbox.py)、[实验入口](../examples/17_sandbox.py)和[本章测试](../tests/test_sandbox.py)，并替换 [cli.py](../lessons/stages/17/minicode/cli.py)，增加三个参数。第 16 章的 CLI 保存在[阶段快照](../lessons/stages/16/minicode/cli.py)里。其他模块不变。
 
 ## 这一章的结果
 
@@ -225,4 +225,4 @@ bwrap 不可用时，前两行相同，接着打印不可用的原因，实验�
 - [Codex：判断失败是否由沙箱造成](https://github.com/openai/codex/blob/93b4e5b4c6474cdbf12614c4ac3acbd006fbee89/codex-rs/sandboxing/src/denial.rs)
 - [bubblewrap 项目](https://github.com/containers/bubblewrap)
 
-[上一章：交付](16-shipping.md) · [目录](README.md)
+[上一章：交付](16-shipping.md) · [目录](README.md) · [下一章：运行控制与记录](18-runtime.md)

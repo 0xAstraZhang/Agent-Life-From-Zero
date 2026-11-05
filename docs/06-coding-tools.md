@@ -12,12 +12,12 @@ uv sync
 
 上一章已经证明：同一个循环可以接三种模型协议。现在只替换工具集合，让它完成一次真正的代码修改。
 
-这一章增加 [coding_tools.py](../minicode/coding_tools.py)，保持 `Agent` 和三个协议适配器不变。
+这一章增加 [coding_tools.py](../lessons/stages/06/minicode/coding_tools.py)，保持 `Agent` 和三个协议适配器不变。
 你将完成六个工具，并用假模型执行“读取 → 修改 → 验证”。
 
 ## 本章文件清单
 
-保留上一章全部文件，新建 [minicode/coding_tools.py](../minicode/coding_tools.py)，新增[实验入口](../examples/06_coding_tools.py)和[本章测试](../tests/test_coding_tools.py)。这些链接是本章完整文件；导出目录中的同名文件内容一致。正文随后展示的是完整文件中的解释片段，不是省略了导入后还能单独运行的脚本。
+保留上一章全部文件，新建 [minicode/coding_tools.py](../lessons/stages/06/minicode/coding_tools.py)，新增[实验入口](../examples/06_coding_tools.py)和[本章测试](../tests/test_coding_tools.py)。这些链接是本章完整文件；导出目录中的同名文件内容一致。正文随后展示的是完整文件中的解释片段，不是省略了导入后还能单独运行的脚本。
 
 完成后运行本章命令，再执行 `uv run python -m pytest tests -q`，确认已有能力没有回退。不要把前面建立的模型、工具或权限对象全部丢掉重建；只在下文指定的位置增加本章能力。
 

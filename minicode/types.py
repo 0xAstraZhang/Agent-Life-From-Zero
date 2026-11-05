@@ -65,6 +65,8 @@ class ModelReply:
     usage: Usage
     stop_reason: str
     error: str = ""
+    usage_details: dict = field(default_factory=dict)
+    metadata: dict = field(default_factory=dict)
 
 
 @dataclass

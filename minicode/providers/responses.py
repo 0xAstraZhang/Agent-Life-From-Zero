@@ -1,6 +1,6 @@
 """OpenAI Responses: messages and tool exchanges are typed input/output items."""
 from ..types import Message, ModelReply, StreamEvent, Text, ToolCall, ToolResult, Usage, message_text
-from .base import HTTPModel, ProtocolError, arguments, parse_call
+from .base import HTTPModel, ProtocolError, arguments
 
 
 class ResponsesModel(HTTPModel):
@@ -26,7 +26,8 @@ class ResponsesModel(HTTPModel):
                 "include": ["reasoning.encrypted_content"], "max_output_tokens": self.config.max_tokens}
         if tools:
             body["tools"] = [{"type": "function", "name": t.name, "description": t.description,
-                              "parameters": t.parameters, "strict": False} for t in tools]
+                              "parameters": self.tool_schema(t.parameters), "strict": self.config.strict_tools} for t in tools]
+        body.update(self.controls(tools))
         return body
 
     def decode(self, response):
@@ -44,7 +45,7 @@ class ResponsesModel(HTTPModel):
                     else:
                         raise ProtocolError(f"不支持的 Responses 内容：{part['type']}")
             elif kind == "function_call":
-                content.append(parse_call(item.get("call_id"), item.get("name"), item.get("arguments", "")))
+                content.append(self.parse_call(item.get("call_id"), item.get("name"), item.get("arguments", "")))
             elif kind != "reasoning":
                 raise ProtocolError(f"不支持的 Responses 输出项：{kind}")
         status = response.get("status")
@@ -63,9 +64,9 @@ class ResponsesModel(HTTPModel):
             reason = "refusal"
         u = response.get("usage") or {}
         message = self.remember(Message("assistant", content), response.get("output", []))
-        return ModelReply(message, Usage(u.get("input_tokens", 0), u.get("output_tokens", 0)), reason, error)
+        return self.finish(ModelReply(message, Usage(u.get("input_tokens", 0), u.get("output_tokens", 0)), reason, error), response)
 
-    def stream(self, messages, tools=None):
+    def _stream(self, messages, tools=None):
         call_ids = {}
         for event in self._events(messages, tools):
             if event == "[DONE]":

@@ -5,7 +5,7 @@
 一个 Agent 可以连续调查所有问题，但它的历史也会装进所有调查细节。
 当任务可以拆成独立的问题时，可以让子 Agent 分别调查，只把结论交回主 Agent。
 
-本章新增 [subagents.py](../minicode/subagents.py)。
+本章新增 [subagents.py](../lessons/stages/12/minicode/subagents.py)。
 先实现只读、串行、不允许嵌套的委派。
 上下文隔离、工具约束和共同预算清楚之后，再考虑更复杂的调度。
 

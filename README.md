@@ -2,7 +2,7 @@
 
 从零用 Python 构建 minicode：内部统一消息、工具调用与工具结果，外部适配 **OpenAI Chat Completions、OpenAI Responses、Anthropic Messages**。
 
-教程共 00–17 章。先用假模型观察最小循环，再实现三个协议适配器，然后加入编码工具、权限、流式输出、上下文、会话、规划、子 Agent、Skills 和 MCP，接着评测与打包，最后为 Bash 加上 Linux 沙箱。设计参考 Codex、OpenCode 和 pi，源码版本与取舍见[参考实现](docs/references.md)。
+教程共 00–18 章。先用假模型观察最小循环，再实现三个协议适配器，然后加入编码工具、权限、流式输出、上下文、会话、规划、子 Agent、Skills 和 MCP，接着评测与打包，为 Bash 加上 Linux 沙箱，最后补齐模型控制、任务期限、长任务压缩和运行记录。设计参考 Codex、OpenCode 和 pi，源码版本与取舍见[参考实现](docs/references.md)。
 
 ## 从这里开始
 
@@ -93,6 +93,22 @@ uv run minicode --sandbox --sandbox-writable ~/.cache/uv --sandbox-network
 ```
 
 沙箱不限制读取，也不覆盖 MCP 子进程；范围见[第 17 章](docs/17-sandbox.md)。`--mcp-command` 会启动你明确指定的本地程序；教程不会自动加载或执行项目里的 hooks、技能脚本或 MCP 配置。
+
+## 运行控制与记录
+
+最终版本支持显式设置思考模式和推理强度。以下命令使用 DeepSeek 的 Anthropic 兼容接口；在环境中另行设置 `MINICODE_API_KEY`：
+
+```bash
+uv run minicode --api anthropic-messages --provider deepseek \
+  --model deepseek-flash --base-url https://api.deepseek.com/anthropic/v1 \
+  --thinking enabled --reasoning-effort high \
+  --request-timeout 120 --max-retries 2 --task-timeout 900 \
+  --context-window 128000 --max-output-tokens 8192 \
+  --read-only --event-log .minicode/run.jsonl \
+  -p "阅读项目，说明一次模型请求如何完成工具往返"
+```
+
+参数按服务商和协议校验，不支持的组合会在请求前报错。`--event-log` 保存运行配置、请求和工具耗时、重试、用量及终止记录；费用换算需要额外提供价格文件。长文件可按行读取，命令输出可通过日志工具续读，也可以显式开启后台命令会话。完整用法和边界见[第 18 章](docs/18-runtime.md)。
 
 ## 检查
 

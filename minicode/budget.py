@@ -33,10 +33,24 @@ class Budget:
 class BudgetModel:
     def __init__(self, inner, budget: Budget):
         self.inner, self.budget = inner, budget
+        self.deadline = getattr(inner, "deadline", None)
+
+    def set_deadline(self, deadline):
+        self.deadline = deadline
+        setter = getattr(self.inner, "set_deadline", None)
+        if setter:
+            setter(deadline)
 
     def complete(self, messages, tools=()):
         self.budget.check()
         reply = self.inner.complete(messages, tools)
+        self.budget.record(reply.usage)
+        return reply
+
+    def summary_complete(self, messages):
+        self.budget.check()
+        summarize = getattr(self.inner, "summary_complete", None)
+        reply = summarize(messages) if summarize else self.inner.complete(messages, [])
         self.budget.record(reply.usage)
         return reply
 

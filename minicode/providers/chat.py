@@ -1,6 +1,6 @@
 """OpenAI Chat Completions wire adapter (text and local function tools)."""
 from ..types import Message, ModelReply, StreamEvent, Text, ToolCall, ToolResult, Usage, message_text
-from .base import HTTPModel, ProtocolError, arguments, parse_call
+from .base import HTTPModel, ProtocolError, arguments
 
 
 class ChatCompletionsModel(HTTPModel):
@@ -29,8 +29,9 @@ class ChatCompletionsModel(HTTPModel):
                 self.config.chat_token_parameter: self.config.max_tokens}
         if tools:
             body["tools"] = [{"type": "function", "function": {
-                "name": t.name, "description": t.description, "parameters": t.parameters,
-                "strict": False}} for t in tools]
+                "name": t.name, "description": t.description, "parameters": self.tool_schema(t.parameters),
+                "strict": self.config.strict_tools}} for t in tools]
+        body.update(self.controls(tools))
         return body
 
     def decode(self, response):
@@ -52,7 +53,7 @@ class ChatCompletionsModel(HTTPModel):
         for call in wire.get("tool_calls") or []:
             if call.get("type") != "function":
                 raise ProtocolError("不支持此类 Chat 工具")
-            content.append(parse_call(call.get("id"), call["function"].get("name"),
+            content.append(self.parse_call(call.get("id"), call["function"].get("name"),
                                       call["function"].get("arguments", "")))
         reason = {"stop": "stop", "tool_calls": "tool_calls", "length": "length",
                   "content_filter": "refusal"}.get(choice.get("finish_reason"), "error")
@@ -63,19 +64,21 @@ class ChatCompletionsModel(HTTPModel):
         saved = {k: v for k, v in wire.items() if k in {
             "role", "content", "tool_calls", "refusal", "reasoning_content"}}
         message = self.remember(Message("assistant", content), saved)
-        return ModelReply(message, Usage(usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0)),
-                          reason, "未知 finish_reason" if reason == "error" else "")
+        return self.finish(ModelReply(message, Usage(usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0)),
+                          reason, "未知 finish_reason" if reason == "error" else ""), response)
 
-    def stream(self, messages, tools=None):
+    def _stream(self, messages, tools=None):
         wire = {"role": "assistant", "content": ""}
         calls = {}
         finish = None
         usage = {}
+        metadata = {}
         saw_done = False
         for event in self._events(messages, tools):
             if event == "[DONE]":
                 saw_done = True
                 break
+            metadata.update({key: event[key] for key in ("id", "model") if key in event})
             if event.get("usage"):
                 usage = event["usage"]
             for choice in event.get("choices", []):
@@ -105,5 +108,5 @@ class ChatCompletionsModel(HTTPModel):
             raise ProtocolError("Chat 流没有完整结束；不执行已收到的部分工具调用")
         if calls:
             wire["tool_calls"] = [calls[i] for i in sorted(calls)]
-        reply = self.decode({"choices": [{"message": wire, "finish_reason": finish}], "usage": usage})
+        reply = self.decode({"choices": [{"message": wire, "finish_reason": finish}], "usage": usage, **metadata})
         yield StreamEvent("done", reply=reply)
